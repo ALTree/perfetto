@@ -11,7 +11,7 @@ import (
 )
 
 type Trace struct {
-	pt  pp.Trace
+	Pt  pp.Trace
 	TID uint32
 }
 
@@ -69,15 +69,13 @@ func (t Thread) Emit() *pp.TracePacket_TrackDescriptor {
 
 func (t *Trace) AddProcess(pid int32, name string) Process {
 	pr := NewProcess(pid, name)
-	//t.procs = append(t.procs, pr)
-	t.pt.Packet = append(t.pt.Packet, &pp.TracePacket{Data: pr.Emit()})
+	t.Pt.Packet = append(t.Pt.Packet, &pp.TracePacket{Data: pr.Emit()})
 	return pr
 }
 
 func (t *Trace) AddThread(pid, tid int32, name string) Thread {
 	tr := NewThread(pid, tid, name)
-	//t.threads = append(t.threads, tr)
-	t.pt.Packet = append(t.pt.Packet, &pp.TracePacket{Data: tr.Emit()})
+	t.Pt.Packet = append(t.Pt.Packet, &pp.TracePacket{Data: tr.Emit()})
 	return tr
 }
 
@@ -149,7 +147,7 @@ func (e Event) Emit() *pp.TracePacket_TrackEvent {
 }
 
 func (t *Trace) AddEvent(e Event) {
-	t.pt.Packet = append(t.pt.Packet,
+	t.Pt.Packet = append(t.Pt.Packet,
 		&pp.TracePacket{
 			Timestamp:                       &e.Timestamp,
 			Data:                            e.Emit(),
@@ -173,7 +171,7 @@ func Test() {
 	trace.AddEvent(t2.InstantEvent(500, "event2"))
 	trace.AddEvent(t2.EndSlice(800))
 
-	data, err := proto.Marshal(&trace.pt)
+	data, err := proto.Marshal(&trace.Pt)
 	if err != nil {
 		panic(err)
 	}

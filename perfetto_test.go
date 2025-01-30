@@ -10,7 +10,7 @@ import (
 )
 
 func RoundTrip(t *testing.T, trace Trace) pp.Trace {
-	data, err := proto.Marshal(&trace.pt)
+	data, err := proto.Marshal(&trace.Pt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestManyEvents(t *testing.T) {
 
 	tr := RoundTrip(t, trace)
 	AssertEq("trace length", t, len(tr.Packet), 3+2*100)
-	data, _ := proto.Marshal(&trace.pt)
+	data, _ := proto.Marshal(&trace.Pt)
 	os.WriteFile("test.bin", data, 0666)
 
 	packets := tr.Packet[3:]
