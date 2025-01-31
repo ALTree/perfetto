@@ -32,7 +32,8 @@ func NewProcess(pid int32, name string) Process {
 func (p Process) Emit() *pp.TracePacket_TrackDescriptor {
 	return &pp.TracePacket_TrackDescriptor{
 		&pp.TrackDescriptor{
-			Uuid: &p.Uuid,
+			Uuid:          &p.Uuid,
+			ChildOrdering: pp.TrackDescriptor_LEXICOGRAPHIC.Enum(),
 			Process: &pp.ProcessDescriptor{
 				Pid:         &p.Pid,
 				ProcessName: &p.Name,
@@ -85,9 +86,6 @@ type Event struct {
 	Name      string
 	TrackUuid uint64
 }
-
-var EventSliceBegin pp.TrackEvent_Type = pp.TrackEvent_TYPE_SLICE_BEGIN
-var EventSliceEnd pp.TrackEvent_Type = pp.TrackEvent_TYPE_SLICE_END
 
 func (p Process) NewEvent(Type pp.TrackEvent_Type, ts uint64, name string) Event {
 	return Event{
