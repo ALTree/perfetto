@@ -1,20 +1,20 @@
 package perfetto
 
 import (
-	"fmt"
 	"math/rand/v2"
-	"os"
 
 	"google.golang.org/protobuf/proto"
 
 	pp "github.com/ALTree/perfetto/proto"
 )
 
-type Trace struct {
-	Pt  pp.Trace
-	TID uint32
+// ---- { Process } ----------------------------------------------------------------
+
+type Track interface {
+	GetUuid() uint64
 }
 
+// Process represent a track of kind Process inside a perfetto trace
 type Process struct {
 	Pid  int32
 	Name string
@@ -29,11 +29,15 @@ func NewProcess(pid int32, name string) Process {
 	}
 }
 
+func (p Process) GetUuid() uint64 {
+	return p.Uuid
+}
+
 func (p Process) Emit() *pp.TracePacket_TrackDescriptor {
 	return &pp.TracePacket_TrackDescriptor{
 		&pp.TrackDescriptor{
-			Uuid:          &p.Uuid,
-			ChildOrdering: pp.TrackDescriptor_LEXICOGRAPHIC.Enum(),
+			Uuid: &p.Uuid,
+			//ChildOrdering: pp.TrackDescriptor_LEXICOGRAPHIC.Enum(),
 			Process: &pp.ProcessDescriptor{
 				Pid:         &p.Pid,
 				ProcessName: &p.Name,
@@ -41,6 +45,21 @@ func (p Process) Emit() *pp.TracePacket_TrackDescriptor {
 	}
 }
 
+func (p Process) InstantEvent(ts uint64, name string) Event {
+	return NewEvent(p, pp.TrackEvent_TYPE_INSTANT, ts, name)
+}
+
+func (p Process) StartSlice(ts uint64, name string) Event {
+	return NewEvent(p, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name)
+}
+
+func (p Process) EndSlice(ts uint64) Event {
+	return NewEvent(p, pp.TrackEvent_TYPE_SLICE_END, ts, "")
+}
+
+// ---- { Thread } ----------------------------------------------------------------
+
+// Process represent a track of kind Thread inside a perfetto trace
 type Thread struct {
 	Pid, Tid int32
 	Name     string
@@ -56,6 +75,10 @@ func NewThread(pid, tid int32, name string) Thread {
 	}
 }
 
+func (t Thread) GetUuid() uint64 {
+	return t.Uuid
+}
+
 func (t Thread) Emit() *pp.TracePacket_TrackDescriptor {
 	return &pp.TracePacket_TrackDescriptor{
 		&pp.TrackDescriptor{
@@ -68,65 +91,112 @@ func (t Thread) Emit() *pp.TracePacket_TrackDescriptor {
 	}
 }
 
+func (t Thread) InstantEvent(ts uint64, name string) Event {
+	return NewEvent(t, pp.TrackEvent_TYPE_INSTANT, ts, name)
+}
+
+func (t Thread) StartSlice(ts uint64, name string) Event {
+	return NewEvent(t, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name)
+}
+
+func (t Thread) EndSlice(ts uint64) Event {
+	return NewEvent(t, pp.TrackEvent_TYPE_SLICE_END, ts, "")
+}
+
+// ---- { Counter Track } ----------------------------------------------------------------
+
+// Process represent a track of kind Counter inside a perfetto trace
+type CounterTrack struct {
+	Name string
+	Uuid uint64
+}
+
+func NewCounterTrack(name string) CounterTrack {
+	return CounterTrack{
+		Name: name,
+		Uuid: rand.Uint64(),
+	}
+}
+
+func (c CounterTrack) Emit() *pp.TracePacket_TrackDescriptor {
+	return &pp.TracePacket_TrackDescriptor{
+		&pp.TrackDescriptor{
+			Uuid: &c.Uuid,
+			Counter: &pp.CounterDescriptor{
+				UnitName: proto.String("%"),
+			},
+		},
+	}
+}
+
+// NewValue creates a CounterValue event setting the value of the
+// counter associated with the c CounterTrack.
+func (c CounterTrack) NewValue(ts uint64, value int64) Event {
+	return Event{
+		Timestamp: ts,
+		Type:      pp.TrackEvent_TYPE_COUNTER,
+		Name:      c.Name,
+		Value:     value,
+		IsCounter: true,
+		TrackUuid: c.Uuid,
+	}
+}
+
+// ---- { Trace } ----------------------------------------------------------------
+
+// Trace is a top-level perfetto trace file
+type Trace struct {
+	Pt  pp.Trace
+	TID uint32
+}
+
+// AddProcess adds a process with the given pid and name to the trace.
+// It returns a Process handle that can be used to associate events to
+// the process.
 func (t *Trace) AddProcess(pid int32, name string) Process {
 	pr := NewProcess(pid, name)
 	t.Pt.Packet = append(t.Pt.Packet, &pp.TracePacket{Data: pr.Emit()})
 	return pr
 }
 
+// AddThread adds a thread with the given tid and name to the trace,
+// under the process with the given pid. It returns a Thread handle
+// that can be used to associate events to the thread.
 func (t *Trace) AddThread(pid, tid int32, name string) Thread {
 	tr := NewThread(pid, tid, name)
 	t.Pt.Packet = append(t.Pt.Packet, &pp.TracePacket{Data: tr.Emit()})
 	return tr
 }
 
+// AddCounterTrack adds a Counter track with the given name to the
+// trace. It returns a CounterTrack handle that can be used to
+// associate events to the track.
+func (t *Trace) AddCounterTrack(name string) CounterTrack {
+	ct := NewCounterTrack(name)
+	t.Pt.Packet = append(t.Pt.Packet, &pp.TracePacket{Data: ct.Emit()})
+	return ct
+}
+
+// AddEvent add the given event to the trace.
+func (t *Trace) AddEvent(e Event) {
+	t.Pt.Packet = append(t.Pt.Packet,
+		&pp.TracePacket{
+			Timestamp:                       &e.Timestamp,
+			Data:                            e.Emit(),
+			OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{t.TID},
+		})
+}
+
+// ---- { Event } ----------------------------------------------------------------
+
+// Event is a perfetto Event
 type Event struct {
 	Timestamp uint64
 	Type      pp.TrackEvent_Type
 	Name      string
+	IsCounter bool // true iff TrackEvent_Counter
+	Value     int64
 	TrackUuid uint64
-}
-
-func (p Process) NewEvent(Type pp.TrackEvent_Type, ts uint64, name string) Event {
-	return Event{
-		Timestamp: ts,
-		Type:      Type,
-		Name:      name,
-		TrackUuid: p.Uuid,
-	}
-}
-
-func (p Process) InstantEvent(ts uint64, name string) Event {
-	return p.NewEvent(pp.TrackEvent_TYPE_INSTANT, ts, name)
-}
-
-func (p Process) StartSlice(ts uint64, name string) Event {
-	return p.NewEvent(pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name)
-}
-
-func (p Process) EndSlice(ts uint64) Event {
-	return p.NewEvent(pp.TrackEvent_TYPE_SLICE_END, ts, "")
-}
-
-func (t Thread) NewEvent(Type pp.TrackEvent_Type, ts uint64, name string) Event {
-	return Event{
-		Timestamp: ts,
-		Type:      Type,
-		Name:      name,
-		TrackUuid: t.Uuid,
-	}
-}
-
-func (t Thread) InstantEvent(ts uint64, name string) Event {
-	return t.NewEvent(pp.TrackEvent_TYPE_INSTANT, ts, name)
-}
-
-func (t Thread) StartSlice(ts uint64, name string) Event {
-	return t.NewEvent(pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name)
-}
-
-func (t Thread) EndSlice(ts uint64) Event {
-	return t.NewEvent(pp.TrackEvent_TYPE_SLICE_END, ts, "")
 }
 
 func (e Event) Emit() *pp.TracePacket_TrackEvent {
@@ -141,44 +211,24 @@ func (e Event) Emit() *pp.TracePacket_TrackEvent {
 		te.TrackEvent.NameField = &pp.TrackEvent_Name{name}
 	}
 
+	if e.IsCounter {
+		te.TrackEvent.CounterValueField = &pp.TrackEvent_CounterValue{e.Value}
+	}
+
 	return te
 }
 
-func (t *Trace) AddEvent(e Event) {
-	t.Pt.Packet = append(t.Pt.Packet,
-		&pp.TracePacket{
-			Timestamp:                       &e.Timestamp,
-			Data:                            e.Emit(),
-			OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{t.TID},
-		})
-}
-
-func Test() {
-	trace := Trace{TID: 32}
-	trace.AddProcess(1, "my process")
-	t1 := trace.AddThread(1, 2, "thread1")
-	t2 := trace.AddThread(1, 3, "thread2")
-
-	trace.AddEvent(t1.StartSlice(200, "download"))
-	trace.AddEvent(t1.InstantEvent(400, "event1"))
-	trace.AddEvent(t1.StartSlice(500, "process"))
-	trace.AddEvent(t1.EndSlice(800))
-	trace.AddEvent(t1.EndSlice(1000))
-
-	trace.AddEvent(t2.StartSlice(300, "slice2"))
-	trace.AddEvent(t2.InstantEvent(500, "event2"))
-	trace.AddEvent(t2.EndSlice(800))
-
-	data, err := proto.Marshal(&trace.Pt)
-	if err != nil {
-		panic(err)
+func NewEvent(track any, Type pp.TrackEvent_Type, ts uint64, name string) Event {
+	var uuid uint64
+	switch t := track.(type) {
+	case Process:
+	case Thread:
+		uuid = t.Uuid
 	}
-
-	var rtt pp.Trace
-	err = proto.Unmarshal(data, &rtt)
-	if err != nil {
-		panic(err)
+	return Event{
+		Timestamp: ts,
+		Type:      Type,
+		Name:      name,
+		TrackUuid: uuid,
 	}
-	fmt.Printf("%v\n", rtt.Packet[4].GetTrackEvent().GetName())
-	os.WriteFile("test.bin", data, 0666)
 }

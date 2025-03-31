@@ -2,7 +2,6 @@ package perfetto
 
 import (
 	"fmt"
-	"os"
 	"testing"
 
 	pp "github.com/ALTree/perfetto/proto"
@@ -50,6 +49,10 @@ func EventTimestamp(p *pp.TracePacket) uint64 {
 
 func EventName(p *pp.TracePacket) string {
 	return p.GetTrackEvent().GetName()
+}
+
+func EventValue(p *pp.TracePacket) int64 {
+	return p.GetTrackEvent().GetCounterValue()
 }
 
 func EventType(p *pp.TracePacket) string {
@@ -143,6 +146,29 @@ func TestSliceEvent(t *testing.T) {
 	AssertEq("end Track UUID", t, EventTrackUuid(p2), thr.Uuid)
 }
 
+func TestCounterTrack(t *testing.T) {
+	trace := Trace{TID: 32}
+	trace.AddProcess(1, "process #1")
+	cpuload := trace.AddCounterTrack("cpu load")
+
+	for i := range uint64(10) {
+		trace.AddEvent(cpuload.NewValue(100*i, int64(10*i)))
+	}
+
+	tr := RoundTrip(t, trace)
+	AssertEq("trace length", t, len(tr.Packet), 2+10)
+	packets := tr.Packet[2:]
+	for i := range uint64(10) {
+		p := packets[i]
+		AssertEq("Timestamp", t, EventTimestamp(p), 100*i)
+		AssertEq("Name", t, EventName(p), "cpu load")
+		AssertEq("Type", t, EventType(p), "TYPE_COUNTER")
+		AssertEq("Value", t, EventType(p), "TYPE_COUNTER")
+		AssertEq("Track UUID", t, EventTrackUuid(p), cpuload.Uuid)
+	}
+
+}
+
 func TestManyEvents(t *testing.T) {
 	trace := Trace{TID: 32}
 	trace.AddProcess(1, "process #1")
@@ -161,8 +187,6 @@ func TestManyEvents(t *testing.T) {
 
 	tr := RoundTrip(t, trace)
 	AssertEq("trace length", t, len(tr.Packet), 3+2*100)
-	data, _ := proto.Marshal(&trace.Pt)
-	os.WriteFile("test.bin", data, 0666)
 
 	packets := tr.Packet[3:]
 	for i := range uint64(200) {
