@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	pp "github.com/ALTree/perfetto/proto"
+	pp "github.com/ALTree/perfetto/internal/proto"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -5,7 +5,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	pp "github.com/ALTree/perfetto/proto"
+	pp "github.com/ALTree/perfetto/internal/proto"
 )
 
 // ---- { Process } ----------------------------------------------------------------
