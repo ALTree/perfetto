@@ -12,7 +12,7 @@ func main() {
 	trace.AddProcess(1, "Process #1")
 	t1 := trace.AddThread(1, 2, "Thread #1")
 	t2 := trace.AddThread(1, 3, "Thread #2")
-	cpu := trace.AddCounter("cpu load")
+	cpu := trace.AddCounter("cpu load", "%")
 
 	for i := range uint64(100) {
 		trace.AddEvent(t1.StartSlice(i*100, "func1"))

@@ -106,14 +106,16 @@ func (t Thread) EndSlice(ts uint64) Event {
 
 // Counter represents a perfetto track of kind 'Counter'
 type Counter struct {
-	Name string
 	Uuid uint64
+	Name string
+	Unit string
 }
 
-func NewCounter(name string) Counter {
+func NewCounter(name, unit string) Counter {
 	return Counter{
-		Name: name,
 		Uuid: rand.Uint64(),
+		Name: name,
+		Unit: unit,
 	}
 }
 
@@ -123,7 +125,7 @@ func (c Counter) Emit() *pp.TracePacket_TrackDescriptor {
 			Uuid:                &c.Uuid,
 			StaticOrDynamicName: &pp.TrackDescriptor_Name{c.Name},
 			Counter: &pp.CounterDescriptor{
-				UnitName: proto.String("%"),
+				UnitName: proto.String(c.Unit),
 			},
 		},
 	}
@@ -171,8 +173,8 @@ func (t *Trace) AddThread(pid, tid int32, name string) Thread {
 // AddCounter adds a Counter track with the given name to the trace.
 // It returns a Counter handle that can be used to associate events to
 // the track.
-func (t *Trace) AddCounter(name string) Counter {
-	ct := NewCounter(name)
+func (t *Trace) AddCounter(name, unit string) Counter {
+	ct := NewCounter(name, unit)
 	t.Pt.Packet = append(t.Pt.Packet, &pp.TracePacket{Data: ct.Emit()})
 	return ct
 }
