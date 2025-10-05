@@ -166,7 +166,6 @@ func TestCounterTrack(t *testing.T) {
 		AssertEq("Value", t, EventType(p), "TYPE_COUNTER")
 		AssertEq("Track UUID", t, EventTrackUuid(p), cpuload.Uuid)
 	}
-
 }
 
 func TestManyEvents(t *testing.T) {

@@ -1,0 +1,42 @@
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/ALTree/perfetto"
+	"google.golang.org/protobuf/proto"
+)
+
+func main() {
+	trace := perfetto.Trace{TID: 1}
+	trace.AddProcess(1, "Process #1")
+	t1 := trace.AddThread(1, 2, "Thread #1")
+	t2 := trace.AddThread(1, 3, "Thread #2")
+	cpu := trace.AddCounterTrack("cpu load")
+
+	for i := range uint64(100) {
+		trace.AddEvent(t1.StartSlice(i*100, "func1"))
+		trace.AddEvent(t1.EndSlice(i*100 + 50))
+
+		trace.AddEvent(t2.StartSlice(i*90, "func2"))
+		trace.AddEvent(t2.StartSlice(i*90+10, "func2a"))
+		trace.AddEvent(t2.EndSlice(i*90 + 40))
+		trace.AddEvent(t2.StartSlice(i*90+40, "func2b"))
+		trace.AddEvent(t2.EndSlice(i*90 + 80))
+		trace.AddEvent(t2.EndSlice(i*90 + 80))
+
+		trace.AddEvent(cpu.NewValue(100*i, int64(i)))
+	}
+
+	data, err := proto.Marshal(&trace.Pt)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	err = os.WriteFile("trace.proto", data, 0666)
+	if err != nil {
+		fmt.Println(err)
+	}
+}
