@@ -37,7 +37,6 @@ func (p Process) Emit() *pp.TracePacket_TrackDescriptor {
 	return &pp.TracePacket_TrackDescriptor{
 		&pp.TrackDescriptor{
 			Uuid: &p.Uuid,
-			//ChildOrdering: pp.TrackDescriptor_LEXICOGRAPHIC.Enum(),
 			Process: &pp.ProcessDescriptor{
 				Pid:         &p.Pid,
 				ProcessName: &p.Name,
@@ -121,7 +120,8 @@ func NewCounterTrack(name string) CounterTrack {
 func (c CounterTrack) Emit() *pp.TracePacket_TrackDescriptor {
 	return &pp.TracePacket_TrackDescriptor{
 		&pp.TrackDescriptor{
-			Uuid: &c.Uuid,
+			Uuid:                &c.Uuid,
+			StaticOrDynamicName: &pp.TrackDescriptor_Name{c.Name},
 			Counter: &pp.CounterDescriptor{
 				UnitName: proto.String("%"),
 			},

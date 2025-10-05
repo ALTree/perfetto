@@ -43,6 +43,14 @@ func ThreadTid(p *pp.TracePacket) int32 {
 	return p.GetTrackDescriptor().GetThread().GetTid()
 }
 
+func CounterTrackName(p *pp.TracePacket) string {
+	trn, ok := p.GetTrackDescriptor().GetStaticOrDynamicName().(*pp.TrackDescriptor_Name)
+	if !ok {
+		return "ERROR: not a TrackDescriptor_Name"
+	}
+	return trn.Name
+}
+
 func EventTimestamp(p *pp.TracePacket) uint64 {
 	return p.GetTimestamp()
 }
@@ -157,6 +165,9 @@ func TestCounterTrack(t *testing.T) {
 
 	tr := RoundTrip(t, trace)
 	AssertEq("trace length", t, len(tr.Packet), 2+10)
+	cpuPacket := tr.Packet[1]
+	AssertEq("Counter Track name", t, CounterTrackName(cpuPacket), "cpu load")
+
 	packets := tr.Packet[2:]
 	for i := range uint64(10) {
 		p := packets[i]
