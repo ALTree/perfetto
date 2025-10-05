@@ -8,13 +8,13 @@ import (
 	pp "github.com/ALTree/perfetto/internal/proto"
 )
 
-// ---- { Process } ----------------------------------------------------------------
+// -- { Process }
 
 type Track interface {
 	GetUuid() uint64
 }
 
-// Process represent a track of kind Process inside a perfetto trace
+// Process represents a perfetto track of kind 'process'
 type Process struct {
 	Pid  int32
 	Name string
@@ -56,9 +56,9 @@ func (p Process) EndSlice(ts uint64) Event {
 	return NewEvent(p, pp.TrackEvent_TYPE_SLICE_END, ts, "")
 }
 
-// ---- { Thread } ----------------------------------------------------------------
+// -- { Thread }
 
-// Process represent a track of kind Thread inside a perfetto trace
+// Thread represents a perfetto track of kind 'thread'
 type Thread struct {
 	Pid, Tid int32
 	Name     string
@@ -102,22 +102,22 @@ func (t Thread) EndSlice(ts uint64) Event {
 	return NewEvent(t, pp.TrackEvent_TYPE_SLICE_END, ts, "")
 }
 
-// ---- { Counter Track } ----------------------------------------------------------------
+// -- { Counter }
 
-// Process represent a track of kind Counter inside a perfetto trace
-type CounterTrack struct {
+// Counter represents a perfetto track of kind 'Counter'
+type Counter struct {
 	Name string
 	Uuid uint64
 }
 
-func NewCounterTrack(name string) CounterTrack {
-	return CounterTrack{
+func NewCounter(name string) Counter {
+	return Counter{
 		Name: name,
 		Uuid: rand.Uint64(),
 	}
 }
 
-func (c CounterTrack) Emit() *pp.TracePacket_TrackDescriptor {
+func (c Counter) Emit() *pp.TracePacket_TrackDescriptor {
 	return &pp.TracePacket_TrackDescriptor{
 		&pp.TrackDescriptor{
 			Uuid:                &c.Uuid,
@@ -131,7 +131,7 @@ func (c CounterTrack) Emit() *pp.TracePacket_TrackDescriptor {
 
 // NewValue creates a CounterValue event setting the value of the
 // counter associated with the c CounterTrack.
-func (c CounterTrack) NewValue(ts uint64, value int64) Event {
+func (c Counter) NewValue(ts uint64, value int64) Event {
 	return Event{
 		Timestamp: ts,
 		Type:      pp.TrackEvent_TYPE_COUNTER,
@@ -142,9 +142,9 @@ func (c CounterTrack) NewValue(ts uint64, value int64) Event {
 	}
 }
 
-// ---- { Trace } ----------------------------------------------------------------
+// -- { Trace }
 
-// Trace is a top-level perfetto trace file
+// Trace is a perfetto trace file
 type Trace struct {
 	Pt  pp.Trace
 	TID uint32
@@ -168,16 +168,16 @@ func (t *Trace) AddThread(pid, tid int32, name string) Thread {
 	return tr
 }
 
-// AddCounterTrack adds a Counter track with the given name to the
-// trace. It returns a CounterTrack handle that can be used to
-// associate events to the track.
-func (t *Trace) AddCounterTrack(name string) CounterTrack {
-	ct := NewCounterTrack(name)
+// AddCounter adds a Counter track with the given name to the trace.
+// It returns a Counter handle that can be used to associate events to
+// the track.
+func (t *Trace) AddCounter(name string) Counter {
+	ct := NewCounter(name)
 	t.Pt.Packet = append(t.Pt.Packet, &pp.TracePacket{Data: ct.Emit()})
 	return ct
 }
 
-// AddEvent add the given event to the trace.
+// AddEvent adds the given event to the trace.
 func (t *Trace) AddEvent(e Event) {
 	t.Pt.Packet = append(t.Pt.Packet,
 		&pp.TracePacket{
@@ -187,35 +187,21 @@ func (t *Trace) AddEvent(e Event) {
 		})
 }
 
-// ---- { Event } ----------------------------------------------------------------
+// Marshal calls proto.Marshal on the protobuf trace
+func (t Trace) Marshal() ([]byte, error) {
+	return proto.Marshal(&t.Pt)
+}
+
+// -- { Event }
 
 // Event is a perfetto Event
 type Event struct {
 	Timestamp uint64
-	Type      pp.TrackEvent_Type
 	Name      string
+	Type      pp.TrackEvent_Type
 	IsCounter bool // true iff TrackEvent_Counter
 	Value     int64
 	TrackUuid uint64
-}
-
-func (e Event) Emit() *pp.TracePacket_TrackEvent {
-	te := &pp.TracePacket_TrackEvent{
-		&pp.TrackEvent{
-			TrackUuid: &e.TrackUuid,
-			Type:      &e.Type,
-		},
-	}
-
-	if name := e.Name; name != "" {
-		te.TrackEvent.NameField = &pp.TrackEvent_Name{name}
-	}
-
-	if e.IsCounter {
-		te.TrackEvent.CounterValueField = &pp.TrackEvent_CounterValue{e.Value}
-	}
-
-	return te
 }
 
 func NewEvent(track any, Type pp.TrackEvent_Type, ts uint64, name string) Event {
@@ -231,4 +217,22 @@ func NewEvent(track any, Type pp.TrackEvent_Type, ts uint64, name string) Event 
 		Name:      name,
 		TrackUuid: uuid,
 	}
+}
+
+func (e Event) Emit() *pp.TracePacket_TrackEvent {
+	te := &pp.TracePacket_TrackEvent{
+		&pp.TrackEvent{
+			TrackUuid: &e.TrackUuid,
+			Type:      &e.Type,
+		},
+	}
+
+	if e.Name != "" {
+		te.TrackEvent.NameField = &pp.TrackEvent_Name{e.Name}
+	}
+	if e.IsCounter {
+		te.TrackEvent.CounterValueField = &pp.TrackEvent_CounterValue{e.Value}
+	}
+
+	return te
 }

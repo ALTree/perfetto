@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/ALTree/perfetto"
-	"google.golang.org/protobuf/proto"
 )
 
 func main() {
@@ -13,7 +12,7 @@ func main() {
 	trace.AddProcess(1, "Process #1")
 	t1 := trace.AddThread(1, 2, "Thread #1")
 	t2 := trace.AddThread(1, 3, "Thread #2")
-	cpu := trace.AddCounterTrack("cpu load")
+	cpu := trace.AddCounter("cpu load")
 
 	for i := range uint64(100) {
 		trace.AddEvent(t1.StartSlice(i*100, "func1"))
@@ -29,7 +28,7 @@ func main() {
 		trace.AddEvent(cpu.NewValue(100*i, int64(i)))
 	}
 
-	data, err := proto.Marshal(&trace.Pt)
+	data, err := trace.Marshal()
 	if err != nil {
 		fmt.Println(err)
 		return
