@@ -160,7 +160,7 @@ func TestCounter(t *testing.T) {
 	trace := Trace{TID: 32}
 	trace.AddProcess(1, "process #1")
 	cpuload := trace.AddCounter("cpu load", "%")
-
+	AssertEq("Counter tracks", t, len(trace.Counters), 1)
 	for i := range uint64(10) {
 		trace.AddEvent(cpuload.NewValue(100*i, int64(10*i)))
 	}

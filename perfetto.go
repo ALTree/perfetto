@@ -148,9 +148,10 @@ func (c Counter) NewValue(ts uint64, value int64) Event {
 
 // Trace is a perfetto trace file
 type Trace struct {
-	Pt      pp.Trace
-	TID     uint32
-	Threads map[int32]Thread
+	Pt       pp.Trace
+	TID      uint32
+	Threads  map[int32]Thread
+	Counters map[string]Counter
 }
 
 // AddProcess adds a process with the given pid and name to the trace.
@@ -181,6 +182,10 @@ func (t *Trace) AddThread(pid, tid int32, name string) Thread {
 func (t *Trace) AddCounter(name, unit string) Counter {
 	ct := NewCounter(name, unit)
 	t.Pt.Packet = append(t.Pt.Packet, &pp.TracePacket{Data: ct.Emit()})
+	if t.Counters == nil {
+		t.Counters = make(map[string]Counter)
+	}
+	t.Counters[name] = ct
 	return ct
 }
 
