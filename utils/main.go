@@ -14,8 +14,14 @@ func main() {
 	t2 := trace.AddThread(1, 3, "Thread #2")
 	cpu := trace.AddCounter("cpu load", "%")
 
+	stack := map[string]string{
+		"level1": "func1",
+		"level2": "func2",
+		"level3": "func3",
+	}
+
 	for i := range uint64(100) {
-		trace.AddEvent(t1.StartSlice(i*100, "func1"))
+		trace.AddEvent(t1.StartSlice(i*100, "func1", stack))
 		trace.AddEvent(t1.EndSlice(i*100 + 50))
 
 		trace.AddEvent(t2.StartSlice(i*90, "func2"))

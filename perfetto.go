@@ -48,8 +48,8 @@ func (p Process) InstantEvent(ts uint64, name string) Event {
 	return NewEvent(p, pp.TrackEvent_TYPE_INSTANT, ts, name)
 }
 
-func (p Process) StartSlice(ts uint64, name string) Event {
-	return NewEvent(p, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name)
+func (p Process) StartSlice(ts uint64, name string, ann ...Annotations) Event {
+	return NewEvent(p, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name, ann...)
 }
 
 func (p Process) EndSlice(ts uint64) Event {
@@ -94,8 +94,8 @@ func (t Thread) InstantEvent(ts uint64, name string) Event {
 	return NewEvent(t, pp.TrackEvent_TYPE_INSTANT, ts, name)
 }
 
-func (t Thread) StartSlice(ts uint64, name string) Event {
-	return NewEvent(t, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name)
+func (t Thread) StartSlice(ts uint64, name string, ann ...Annotations) Event {
+	return NewEvent(t, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name, ann...)
 }
 
 func (t Thread) EndSlice(ts uint64) Event {
@@ -214,28 +214,34 @@ type Event struct {
 	IsCounter bool // true iff TrackEvent_Counter
 	Value     int64
 	TrackUuid uint64
+	Ann       Annotations
 }
 
-func NewEvent(track any, Type pp.TrackEvent_Type, ts uint64, name string) Event {
+func NewEvent(track any, Type pp.TrackEvent_Type, ts uint64, name string, ann ...Annotations) Event {
 	var uuid uint64
 	switch t := track.(type) {
 	case Process:
 	case Thread:
 		uuid = t.Uuid
 	}
-	return Event{
+	e := Event{
 		Timestamp: ts,
 		Type:      Type,
 		Name:      name,
 		TrackUuid: uuid,
 	}
+	if len(ann) > 0 {
+		e.Ann = ann[0]
+	}
+	return e
 }
 
 func (e Event) Emit() *pp.TracePacket_TrackEvent {
 	te := &pp.TracePacket_TrackEvent{
 		&pp.TrackEvent{
-			TrackUuid: &e.TrackUuid,
-			Type:      &e.Type,
+			TrackUuid:        &e.TrackUuid,
+			Type:             &e.Type,
+			DebugAnnotations: e.Ann.Emit(),
 		},
 	}
 
@@ -247,4 +253,16 @@ func (e Event) Emit() *pp.TracePacket_TrackEvent {
 	}
 
 	return te
+}
+
+type Annotations map[string]string
+
+func (a Annotations) Emit() []*pp.DebugAnnotation {
+	var res []*pp.DebugAnnotation
+	for k, v := range a {
+		name := &pp.DebugAnnotation_Name{Name: k}
+		value := &pp.DebugAnnotation_StringValue{StringValue: v}
+		res = append(res, &pp.DebugAnnotation{NameField: name, Value: value})
+	}
+	return res
 }

@@ -2,6 +2,7 @@ package perfetto
 
 import (
 	"fmt"
+	"maps"
 	"testing"
 
 	pp "github.com/ALTree/perfetto/internal/proto"
@@ -69,6 +70,14 @@ func EventType(p *pp.TracePacket) string {
 
 func EventTrackUuid(p *pp.TracePacket) uint64 {
 	return p.GetTrackEvent().GetTrackUuid()
+}
+
+func EventAnnotations(p *pp.TracePacket) map[string]string {
+	res := make(map[string]string)
+	for _, a := range p.GetTrackEvent().GetDebugAnnotations() {
+		res[a.GetName()] = a.GetStringValue()
+	}
+	return res
 }
 
 func TestAddProcess(t *testing.T) {
@@ -220,6 +229,22 @@ func TestManyEvents(t *testing.T) {
 		AssertEq("Name", t, EventName(p), name)
 		AssertEq("Type", t, EventType(p), typ)
 		AssertEq("Track UUID", t, EventTrackUuid(p), uuid)
+	}
+}
+
+func TestAnnotations(t *testing.T) {
+	trace := Trace{TID: 32}
+	trace.AddProcess(1, "process #1")
+	t1 := trace.AddThread(1, 2, "Thread #1")
+
+	ann := map[string]string{"k1": "v1", "k2": "v2", "k3": "v3"}
+	trace.AddEvent(t1.StartSlice(100, "t1 func", ann))
+	trace.AddEvent(t1.EndSlice(150))
+
+	tr := RoundTrip(t, trace)
+	AssertEq("trace length", t, len(tr.Packet), 4)
+	if got := EventAnnotations(tr.Packet[2]); !maps.Equal(ann, got) {
+		t.Errorf("For %s\ngot %v\nexp %v", "Annotations", got, ann)
 	}
 }
 
