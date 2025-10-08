@@ -86,10 +86,11 @@ func TestAddThread(t *testing.T) {
 	trace.AddProcess(1, "process #6")
 	trace.AddThread(1, 2, "thread #1")
 	trace.AddThread(1, 3, "thread #2")
+
+	AssertEq("len(Threads)", t, len(trace.Threads), 2)
+
 	tr := RoundTrip(t, trace)
-
 	AssertEq("trace length", t, len(tr.Packet), 3)
-
 	t1, t2 := tr.Packet[1], tr.Packet[2]
 	AssertEq("Thread #1 Name", t, ThreadName(t1), "thread #1")
 	AssertEq("Thread #1 Tid", t, ThreadTid(t1), 2)
@@ -105,6 +106,7 @@ func TestAddManyThreads(t *testing.T) {
 	for i := range 100 {
 		trace.AddThread(1, int32(i), fmt.Sprintf("Thread #%v", i))
 	}
+	AssertEq("len(Threads)", t, len(trace.Threads), 100)
 
 	tr := RoundTrip(t, trace)
 	AssertEq("trace length", t, len(tr.Packet), 101)
