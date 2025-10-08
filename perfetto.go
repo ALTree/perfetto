@@ -255,13 +255,16 @@ func (e Event) Emit() *pp.TracePacket_TrackEvent {
 	return te
 }
 
-type Annotations map[string]string
+type KV struct {
+	K, V string
+}
+type Annotations []KV
 
 func (a Annotations) Emit() []*pp.DebugAnnotation {
 	var res []*pp.DebugAnnotation
-	for k, v := range a {
-		name := &pp.DebugAnnotation_Name{Name: k}
-		value := &pp.DebugAnnotation_StringValue{StringValue: v}
+	for i := range a {
+		name := &pp.DebugAnnotation_Name{Name: a[i].K}
+		value := &pp.DebugAnnotation_StringValue{StringValue: a[i].V}
 		res = append(res, &pp.DebugAnnotation{NameField: name, Value: value})
 	}
 	return res
