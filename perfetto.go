@@ -8,6 +8,10 @@ import (
 	pp "github.com/ALTree/perfetto/internal/proto"
 )
 
+func init() {
+	InternedStrings = make(map[string]uint64)
+}
+
 // -- { Process }
 
 type Track interface {
@@ -189,14 +193,46 @@ func (t *Trace) AddCounter(name, unit string) Counter {
 	return ct
 }
 
+var InternedStrings map[string]uint64
+var InterningIndex uint64 = 1
+var First bool = true
+
 // AddEvent adds the given event to the trace.
 func (t *Trace) AddEvent(e Event) {
-	t.Pt.Packet = append(t.Pt.Packet,
-		&pp.TracePacket{
-			Timestamp:                       &e.Timestamp,
-			Data:                            e.Emit(),
-			OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{t.TID},
-		})
+	var internedData *pp.InternedData
+	iid, ok := InternedStrings[e.Name]
+	if e.Name != "" && !ok {
+		newIid := InterningIndex
+		iid = InterningIndex
+		internedData = &pp.InternedData{
+			EventNames: []*pp.EventName{
+				&pp.EventName{Iid: &newIid, Name: proto.String(e.Name)},
+			},
+		}
+	}
+
+	tp := &pp.TracePacket{
+		Timestamp:                       &e.Timestamp,
+		Data:                            e.Emit(iid),
+		OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{t.TID},
+	}
+
+	if internedData != nil {
+		tp.InternedData = internedData
+		if First {
+			tp.PreviousPacketDropped = proto.Bool(true)
+			flags := uint32(pp.TracePacket_SEQ_INCREMENTAL_STATE_CLEARED | pp.TracePacket_SEQ_NEEDS_INCREMENTAL_STATE)
+			tp.SequenceFlags = &flags
+			First = false
+		}
+		InternedStrings[e.Name] = iid
+		InterningIndex++
+	} else {
+		flags := uint32(pp.TracePacket_SEQ_NEEDS_INCREMENTAL_STATE)
+		tp.SequenceFlags = &flags
+	}
+
+	t.Pt.Packet = append(t.Pt.Packet, tp)
 }
 
 // Marshal calls proto.Marshal on the protobuf trace
@@ -236,7 +272,7 @@ func NewEvent(track any, Type pp.TrackEvent_Type, ts uint64, name string, ann ..
 	return e
 }
 
-func (e Event) Emit() *pp.TracePacket_TrackEvent {
+func (e Event) Emit(iid uint64) *pp.TracePacket_TrackEvent {
 	te := &pp.TracePacket_TrackEvent{
 		&pp.TrackEvent{
 			TrackUuid:        &e.TrackUuid,
@@ -245,9 +281,10 @@ func (e Event) Emit() *pp.TracePacket_TrackEvent {
 		},
 	}
 
-	if e.Name != "" {
-		te.TrackEvent.NameField = &pp.TrackEvent_Name{e.Name}
-	}
+	// if e.Name != "" {
+	// 	te.TrackEvent.NameField = &pp.TrackEvent_Name{e.Name}
+	// }
+	te.TrackEvent.NameField = &pp.TrackEvent_NameIid{iid}
 	if e.IsCounter {
 		te.TrackEvent.CounterValueField = &pp.TrackEvent_CounterValue{e.Value}
 	}
