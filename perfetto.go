@@ -144,6 +144,62 @@ func (c Counter) NewValue(ts uint64, value int64) Event {
 	}
 }
 
+// -- { Event } ----------------------------------------------------------------
+
+// Event is a perfetto Event
+type Event struct {
+	Timestamp uint64
+	Name      string
+	Type      pp.TrackEvent_Type
+	IsCounter bool // true iff TrackEvent_Counter
+	Value     int64
+	TrackUuid uint64
+	Ann       Annotations
+}
+
+func NewEvent(track any, Type pp.TrackEvent_Type, ts uint64, name string, ann ...Annotations) Event {
+	var uuid uint64
+	switch t := track.(type) {
+	case Process:
+	case Thread:
+		uuid = t.Uuid
+	}
+	e := Event{
+		Timestamp: ts,
+		Type:      Type,
+		Name:      name,
+		TrackUuid: uuid,
+	}
+	if len(ann) > 0 {
+		e.Ann = ann[0]
+	}
+	return e
+}
+
+func (e Event) Emit(iid uint64) *pp.TracePacket_TrackEvent {
+	te := &pp.TracePacket_TrackEvent{
+		&pp.TrackEvent{
+			TrackUuid:        &e.TrackUuid,
+			Type:             &e.Type,
+			DebugAnnotations: e.Ann.Emit(),
+		},
+	}
+
+	if debug.DisableInterning {
+		if e.Name != "" {
+			te.TrackEvent.NameField = &pp.TrackEvent_Name{e.Name}
+		}
+	} else {
+		te.TrackEvent.NameField = &pp.TrackEvent_NameIid{iid}
+	}
+
+	if e.IsCounter {
+		te.TrackEvent.CounterValueField = &pp.TrackEvent_CounterValue{e.Value}
+	}
+
+	return te
+}
+
 // -- { Trace } ----------------------------------------------------------------
 
 // Trace is a perfetto trace file
@@ -153,6 +209,10 @@ type Trace struct {
 	Counters  map[string]Counter
 	interning Interning
 	Pt        pp.Trace
+}
+
+func (t *Trace) Reset() {
+	t.Pt = pp.Trace{}
 }
 
 type Interning struct {
@@ -243,62 +303,6 @@ func (t *Trace) AddEvent(e Event) {
 // Marshal calls proto.Marshal on the protobuf trace
 func (t Trace) Marshal() ([]byte, error) {
 	return proto.Marshal(&t.Pt)
-}
-
-// -- { Event } ----------------------------------------------------------------
-
-// Event is a perfetto Event
-type Event struct {
-	Timestamp uint64
-	Name      string
-	Type      pp.TrackEvent_Type
-	IsCounter bool // true iff TrackEvent_Counter
-	Value     int64
-	TrackUuid uint64
-	Ann       Annotations
-}
-
-func NewEvent(track any, Type pp.TrackEvent_Type, ts uint64, name string, ann ...Annotations) Event {
-	var uuid uint64
-	switch t := track.(type) {
-	case Process:
-	case Thread:
-		uuid = t.Uuid
-	}
-	e := Event{
-		Timestamp: ts,
-		Type:      Type,
-		Name:      name,
-		TrackUuid: uuid,
-	}
-	if len(ann) > 0 {
-		e.Ann = ann[0]
-	}
-	return e
-}
-
-func (e Event) Emit(iid uint64) *pp.TracePacket_TrackEvent {
-	te := &pp.TracePacket_TrackEvent{
-		&pp.TrackEvent{
-			TrackUuid:        &e.TrackUuid,
-			Type:             &e.Type,
-			DebugAnnotations: e.Ann.Emit(),
-		},
-	}
-
-	if debug.DisableInterning {
-		if e.Name != "" {
-			te.TrackEvent.NameField = &pp.TrackEvent_Name{e.Name}
-		}
-	} else {
-		te.TrackEvent.NameField = &pp.TrackEvent_NameIid{iid}
-	}
-
-	if e.IsCounter {
-		te.TrackEvent.CounterValueField = &pp.TrackEvent_CounterValue{e.Value}
-	}
-
-	return te
 }
 
 // -- { Misc } ----------------------------------------------------------------
