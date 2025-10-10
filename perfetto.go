@@ -8,15 +8,11 @@ import (
 	pp "github.com/ALTree/perfetto/internal/proto"
 )
 
-func init() {
-	InternedStrings = make(map[string]uint64)
-}
-
-// -- { Process }
-
 type Track interface {
 	GetUuid() uint64
 }
+
+// -- { Process } ----------------------------------------------------------------
 
 // Process represents a perfetto track of kind 'process'
 type Process struct {
@@ -60,7 +56,7 @@ func (p Process) EndSlice(ts uint64) Event {
 	return NewEvent(p, pp.TrackEvent_TYPE_SLICE_END, ts, "")
 }
 
-// -- { Thread }
+// -- { Thread } ----------------------------------------------------------------
 
 // Thread represents a perfetto track of kind 'thread'
 type Thread struct {
@@ -106,7 +102,7 @@ func (t Thread) EndSlice(ts uint64) Event {
 	return NewEvent(t, pp.TrackEvent_TYPE_SLICE_END, ts, "")
 }
 
-// -- { Counter }
+// -- { Counter } ----------------------------------------------------------------
 
 // Counter represents a perfetto track of kind 'Counter'
 type Counter struct {
@@ -148,14 +144,32 @@ func (c Counter) NewValue(ts uint64, value int64) Event {
 	}
 }
 
-// -- { Trace }
+// -- { Trace } ----------------------------------------------------------------
 
 // Trace is a perfetto trace file
 type Trace struct {
-	Pt       pp.Trace
-	TID      uint32
-	Threads  map[int32]Thread
-	Counters map[string]Counter
+	TID       uint32
+	Threads   map[int32]Thread
+	Counters  map[string]Counter
+	interning Interning
+	Pt        pp.Trace
+}
+
+type Interning struct {
+	EventNames map[string]uint64
+	Id         uint64
+}
+
+func NewTrace(tid uint32) Trace {
+	return Trace{
+		TID:      tid,
+		Threads:  make(map[int32]Thread),
+		Counters: make(map[string]Counter),
+		interning: Interning{
+			EventNames: make(map[string]uint64),
+			Id:         1,
+		},
+	}
 }
 
 // AddProcess adds a process with the given pid and name to the trace.
@@ -173,9 +187,6 @@ func (t *Trace) AddProcess(pid int32, name string) Process {
 func (t *Trace) AddThread(pid, tid int32, name string) Thread {
 	tr := NewThread(pid, tid, name)
 	t.Pt.Packet = append(t.Pt.Packet, &pp.TracePacket{Data: tr.Emit()})
-	if t.Threads == nil {
-		t.Threads = make(map[int32]Thread)
-	}
 	t.Threads[tid] = tr
 	return tr
 }
@@ -186,27 +197,19 @@ func (t *Trace) AddThread(pid, tid int32, name string) Thread {
 func (t *Trace) AddCounter(name, unit string) Counter {
 	ct := NewCounter(name, unit)
 	t.Pt.Packet = append(t.Pt.Packet, &pp.TracePacket{Data: ct.Emit()})
-	if t.Counters == nil {
-		t.Counters = make(map[string]Counter)
-	}
 	t.Counters[name] = ct
 	return ct
 }
 
-var InternedStrings map[string]uint64
-var InterningIndex uint64 = 1
-var First bool = true
-
 // AddEvent adds the given event to the trace.
 func (t *Trace) AddEvent(e Event) {
 	var internedData *pp.InternedData
-	iid, ok := InternedStrings[e.Name]
+	iid, ok := t.interning.EventNames[e.Name]
 	if e.Name != "" && !ok {
-		newIid := InterningIndex
-		iid = InterningIndex
+		iid = t.interning.Id
 		internedData = &pp.InternedData{
 			EventNames: []*pp.EventName{
-				&pp.EventName{Iid: &newIid, Name: proto.String(e.Name)},
+				&pp.EventName{Iid: &iid, Name: proto.String(e.Name)},
 			},
 		}
 	}
@@ -219,14 +222,16 @@ func (t *Trace) AddEvent(e Event) {
 
 	if internedData != nil {
 		tp.InternedData = internedData
-		if First {
+		if t.interning.Id == 1 {
+			// First packet with interning data needs to set this, apparently
 			tp.PreviousPacketDropped = proto.Bool(true)
-			flags := uint32(pp.TracePacket_SEQ_INCREMENTAL_STATE_CLEARED | pp.TracePacket_SEQ_NEEDS_INCREMENTAL_STATE)
+			flags := uint32(
+				pp.TracePacket_SEQ_INCREMENTAL_STATE_CLEARED |
+					pp.TracePacket_SEQ_NEEDS_INCREMENTAL_STATE)
 			tp.SequenceFlags = &flags
-			First = false
 		}
-		InternedStrings[e.Name] = iid
-		InterningIndex++
+		t.interning.EventNames[e.Name] = iid
+		t.interning.Id++
 	} else {
 		flags := uint32(pp.TracePacket_SEQ_NEEDS_INCREMENTAL_STATE)
 		tp.SequenceFlags = &flags
@@ -240,7 +245,7 @@ func (t Trace) Marshal() ([]byte, error) {
 	return proto.Marshal(&t.Pt)
 }
 
-// -- { Event }
+// -- { Event } ----------------------------------------------------------------
 
 // Event is a perfetto Event
 type Event struct {
@@ -281,16 +286,22 @@ func (e Event) Emit(iid uint64) *pp.TracePacket_TrackEvent {
 		},
 	}
 
-	// if e.Name != "" {
-	// 	te.TrackEvent.NameField = &pp.TrackEvent_Name{e.Name}
-	// }
-	te.TrackEvent.NameField = &pp.TrackEvent_NameIid{iid}
+	if debug.DisableInterning {
+		if e.Name != "" {
+			te.TrackEvent.NameField = &pp.TrackEvent_Name{e.Name}
+		}
+	} else {
+		te.TrackEvent.NameField = &pp.TrackEvent_NameIid{iid}
+	}
+
 	if e.IsCounter {
 		te.TrackEvent.CounterValueField = &pp.TrackEvent_CounterValue{e.Value}
 	}
 
 	return te
 }
+
+// -- { Misc } ----------------------------------------------------------------
 
 type KV struct {
 	K, V string
@@ -305,4 +316,10 @@ func (a Annotations) Emit() []*pp.DebugAnnotation {
 		res = append(res, &pp.DebugAnnotation{NameField: name, Value: value})
 	}
 	return res
+}
+
+var debug = struct {
+	DisableInterning bool
+}{
+	DisableInterning: false,
 }

@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	trace := perfetto.Trace{TID: 1}
+	trace := perfetto.NewTrace(1)
 	trace.AddProcess(1, "Process #1")
 	t1 := trace.AddThread(1, 2, "Thread #1")
 	t2 := trace.AddThread(1, 3, "Thread #2")

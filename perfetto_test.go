@@ -60,6 +60,10 @@ func EventName(p *pp.TracePacket) string {
 	return p.GetTrackEvent().GetName()
 }
 
+func EventNameIid(p *pp.TracePacket) uint64 {
+	return p.GetTrackEvent().GetNameIid()
+}
+
 func EventValue(p *pp.TracePacket) int64 {
 	return p.GetTrackEvent().GetCounterValue()
 }
@@ -81,7 +85,7 @@ func EventAnnotations(p *pp.TracePacket) []KV {
 }
 
 func TestAddProcess(t *testing.T) {
-	trace := Trace{TID: 32}
+	trace := NewTrace(32)
 	trace.AddProcess(1, "process #6")
 	tr := RoundTrip(t, trace)
 
@@ -91,7 +95,7 @@ func TestAddProcess(t *testing.T) {
 }
 
 func TestAddThread(t *testing.T) {
-	trace := Trace{TID: 32}
+	trace := NewTrace(32)
 	trace.AddProcess(1, "process #6")
 	trace.AddThread(1, 2, "thread #1")
 	trace.AddThread(1, 3, "thread #2")
@@ -110,7 +114,7 @@ func TestAddThread(t *testing.T) {
 }
 
 func TestAddManyThreads(t *testing.T) {
-	trace := Trace{TID: 32}
+	trace := NewTrace(32)
 	trace.AddProcess(1, "process #3")
 	for i := range 100 {
 		trace.AddThread(1, int32(i), fmt.Sprintf("Thread #%v", i))
@@ -128,7 +132,7 @@ func TestAddManyThreads(t *testing.T) {
 }
 
 func TestInstantEvent(t *testing.T) {
-	trace := Trace{TID: 32}
+	trace := NewTrace(32)
 	trace.AddProcess(1, "process #1")
 	thr := trace.AddThread(1, 2, "Thread #1")
 
@@ -138,14 +142,18 @@ func TestInstantEvent(t *testing.T) {
 	AssertEq("trace length", t, len(tr.Packet), 3)
 	p := tr.Packet[2]
 	AssertEq("Timestamp", t, EventTimestamp(p), 500)
-	AssertEq("Name", t, EventName(p), "Event #1")
+	AssertEq("Name", t, EventName(p), "")
+	AssertNeq("Name", t, EventNameIid(p), 0)
 	AssertEq("Type", t, EventType(p), "TYPE_INSTANT")
 	AssertEq("Track UUID", t, EventTrackUuid(p), thr.Uuid)
 
 }
 
 func TestSliceEvent(t *testing.T) {
-	trace := Trace{TID: 32}
+	debug.DisableInterning = true
+	defer func() { debug.DisableInterning = false }()
+
+	trace := NewTrace(32)
 	trace.AddProcess(1, "process #1")
 	thr := trace.AddThread(1, 2, "Thread #1")
 
@@ -155,18 +163,22 @@ func TestSliceEvent(t *testing.T) {
 	tr := RoundTrip(t, trace)
 	AssertEq("trace length", t, len(tr.Packet), 4)
 	p1, p2 := tr.Packet[2], tr.Packet[3]
+
 	AssertEq("start Timestamp", t, EventTimestamp(p1), 1000)
 	AssertEq("start Name", t, EventName(p1), "Slice #1")
+	AssertEq("start Name Iid", t, EventNameIid(p1), 0)
 	AssertEq("start Type", t, EventType(p1), "TYPE_SLICE_BEGIN")
 	AssertEq("start Track UUID", t, EventTrackUuid(p1), thr.Uuid)
+
 	AssertEq("end Timestamp", t, EventTimestamp(p2), 1500)
 	AssertEq("end Name", t, EventName(p2), "")
+	AssertEq("start Name Iid", t, EventNameIid(p2), 0)
 	AssertEq("end Type", t, EventType(p2), "TYPE_SLICE_END")
 	AssertEq("end Track UUID", t, EventTrackUuid(p2), thr.Uuid)
 }
 
 func TestCounter(t *testing.T) {
-	trace := Trace{TID: 32}
+	trace := NewTrace(32)
 	trace.AddProcess(1, "process #1")
 	cpuload := trace.AddCounter("cpu load", "%")
 	AssertEq("Counter tracks", t, len(trace.Counters), 1)
@@ -183,7 +195,7 @@ func TestCounter(t *testing.T) {
 	for i := range uint64(10) {
 		p := packets[i]
 		AssertEq("Timestamp", t, EventTimestamp(p), 100*i)
-		AssertEq("Name", t, EventName(p), "cpu load")
+		AssertEq("Name", t, EventName(p), "")
 		AssertEq("Type", t, EventType(p), "TYPE_COUNTER")
 		AssertEq("Value", t, EventType(p), "TYPE_COUNTER")
 		AssertEq("Track UUID", t, EventTrackUuid(p), cpuload.Uuid)
@@ -191,7 +203,7 @@ func TestCounter(t *testing.T) {
 }
 
 func TestManyEvents(t *testing.T) {
-	trace := Trace{TID: 32}
+	trace := NewTrace(32)
 	trace.AddProcess(1, "process #1")
 	thr1 := trace.AddThread(1, 2, "Thread #1")
 	thr2 := trace.AddThread(1, 3, "Thread #2")
@@ -216,11 +228,11 @@ func TestManyEvents(t *testing.T) {
 			j := i / 2
 			switch i % 4 {
 			case 0:
-				return j * 100, "thr1 func", "TYPE_SLICE_BEGIN", thr1.Uuid
+				return j * 100, "", "TYPE_SLICE_BEGIN", thr1.Uuid
 			case 1:
 				return j*100 + 50, "", "TYPE_SLICE_END", thr1.Uuid
 			case 2:
-				return j * 100, "thr2 func", "TYPE_SLICE_BEGIN", thr2.Uuid
+				return j * 100, "", "TYPE_SLICE_BEGIN", thr2.Uuid
 			default:
 				return j*100 + 50, "", "TYPE_SLICE_END", thr2.Uuid
 			}
@@ -233,7 +245,7 @@ func TestManyEvents(t *testing.T) {
 }
 
 func TestAnnotations(t *testing.T) {
-	trace := Trace{TID: 32}
+	trace := NewTrace(32)
 	trace.AddProcess(1, "process #1")
 	t1 := trace.AddThread(1, 2, "Thread #1")
 
