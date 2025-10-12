@@ -8,21 +8,27 @@ import (
 )
 
 func main() {
-	trace := perfetto.NewTrace(1)
-	trace.AddProcess(1, "Process #1")
+	trace := perfetto.NewTrace()
+	p := trace.AddProcess(1, "Process #1")
 	t1 := trace.AddThread(1, 2, "Thread #1")
 	t2 := trace.AddThread(1, 3, "Thread #2")
 	cpu := trace.AddCounter("cpu load", "%")
 
 	stack := []perfetto.KV{
-		{"level1", "func1"},
-		{"level2", "func2"},
-		{"level3", "func3"},
+		{"1", "func1"},
+		{"2", "func2"},
+		{"3", "func3"},
+	}
+
+	for i := range uint64(50) {
+		trace.AddEvent(p.StartSlice(i*100, "process func"))
+		trace.AddEvent(p.EndSlice(i*100 + 50))
 	}
 
 	for i := range uint64(100) {
 		trace.AddEvent(t1.StartSlice(i*100, "func1", stack))
 		trace.AddEvent(t1.EndSlice(i*100 + 50))
+		trace.AddEvent(t1.InstantEvent(i*100+60, "Instant event"))
 
 		trace.AddEvent(t2.StartSlice(i*90, "func2"))
 		trace.AddEvent(t2.StartSlice(i*90+10, "func2a"))
