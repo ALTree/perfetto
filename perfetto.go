@@ -165,19 +165,22 @@ func NewEvent(track Track, Type pp.TrackEvent_Type, ts uint64, name string, flow
 	return e
 }
 
-func (e Event) Emit(iid uint64) *pp.TracePacket_TrackEvent {
+func (e Event) Emit(int Interning) *pp.TracePacket_TrackEvent {
 	te := &pp.TracePacket_TrackEvent{
 		&pp.TrackEvent{
 			TrackUuid:        &e.TrackUuid,
 			Type:             &e.Type,
 			FlowIds:          e.Flows,
-			DebugAnnotations: e.Ann.Emit(),
+			DebugAnnotations: e.Ann.Emit(int.AnnValues),
 		},
 	}
 
 	if debug.DisableInterning {
-		te.TrackEvent.NameField = &pp.TrackEvent_Name{e.Name}
+		if e.Name != "" {
+			te.TrackEvent.NameField = &pp.TrackEvent_Name{e.Name}
+		}
 	} else {
+		iid, _ := int.EventNames[e.Name]
 		te.TrackEvent.NameField = &pp.TrackEvent_NameIid{iid}
 	}
 
@@ -200,7 +203,9 @@ type Trace struct {
 
 type Interning struct {
 	EventNames map[string]uint64
-	NextId     uint64
+	NextNameId uint64
+	AnnValues  map[string]uint64
+	NextAnnId  uint64
 }
 
 func NewTrace() Trace {
@@ -209,12 +214,14 @@ func NewTrace() Trace {
 		Counters: make(map[string]Counter),
 		interning: Interning{
 			EventNames: make(map[string]uint64),
-			NextId:     1,
+			NextNameId: 1,
+			AnnValues:  make(map[string]uint64),
+			NextAnnId:  1,
 		},
 	}
 }
 
-// AddTrack adds a BasicTrack with the give name to the trace. It
+// AddTrack adds a BasicTrack with the given name to the trace. It
 // returns a handle that can be used to associate events to the
 // track.
 func (t *Trace) AddTrack(name string) BasicTrack {
@@ -255,41 +262,62 @@ func (t *Trace) AddCounter(name, unit string) Counter {
 // AddEvent adds the given event to the trace.
 func (t *Trace) AddEvent(e Event) {
 
-	// If the Event name string is not already interned, do so
 	var internedData *pp.InternedData
-	iid, ok := t.interning.EventNames[e.Name]
-	if !debug.DisableInterning && !ok && e.Name != "" {
-		iid = t.interning.NextId
-		internedData = &pp.InternedData{
-			EventNames: []*pp.EventName{
-				&pp.EventName{Iid: &iid, Name: &e.Name},
-			},
+
+	if !debug.DisableInterning {
+		// Event Names Interning
+		if _, ok := t.interning.EventNames[e.Name]; !ok && e.Name != "" {
+			iid := t.interning.NextNameId
+			internedData = &pp.InternedData{
+				EventNames: []*pp.EventName{
+					&pp.EventName{Iid: &iid, Name: &e.Name},
+				},
+			}
+			t.interning.EventNames[e.Name] = iid
+			t.interning.NextNameId++
+		}
+
+		// Debug Annotations Values Interning
+		var arr []*pp.InternedString
+		for _, ann := range e.Ann {
+			iid, ok := t.interning.AnnValues[ann.V]
+			if !ok && ann.V != "" {
+				iid = t.interning.NextAnnId
+				arr = append(arr, &pp.InternedString{Iid: &iid, Str: []byte(ann.V)})
+				t.interning.AnnValues[ann.V] = iid
+				t.interning.NextAnnId++
+			}
+		}
+		if len(arr) > 0 {
+			if internedData == nil {
+				internedData = &pp.InternedData{}
+			}
+			internedData.DebugAnnotationStringValues = arr
 		}
 	}
 
 	tp := &pp.TracePacket{
 		Timestamp:                       &e.Timestamp,
-		Data:                            e.Emit(iid),
+		Data:                            e.Emit(t.interning),
 		OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{TPSID},
 	}
 
-	// In addition to this Event's data, emit the interning data for
-	// the new name
+	// In addition to this Event's data, emit the interning data
 	if internedData != nil {
 		tp.InternedData = internedData
-		if t.interning.NextId == 1 {
-			// First packet with interning data needs to set this, apparently
+		if len(t.interning.EventNames) == 1 {
+			// First packet with interning data needs to set these
 			tp.PreviousPacketDropped = proto.Bool(true)
 			tp.SequenceFlags = proto.Uint32(uint32(
 				pp.TracePacket_SEQ_INCREMENTAL_STATE_CLEARED |
 					pp.TracePacket_SEQ_NEEDS_INCREMENTAL_STATE))
 		}
-		t.interning.EventNames[e.Name] = iid
-		t.interning.NextId++
 	} else {
-		// Packets using interned data need to set this
-		tp.SequenceFlags = proto.Uint32(uint32(
-			pp.TracePacket_SEQ_NEEDS_INCREMENTAL_STATE))
+		// Later packets using interned data need to set this
+		if !debug.DisableInterning {
+			tp.SequenceFlags = proto.Uint32(uint32(
+				pp.TracePacket_SEQ_NEEDS_INCREMENTAL_STATE))
+		}
 	}
 
 	t.pt.Packet = append(t.pt.Packet, tp)
@@ -344,12 +372,18 @@ type KV struct {
 
 type Annotations []KV
 
-func (a Annotations) Emit() []*pp.DebugAnnotation {
+func (a Annotations) Emit(iids map[string]uint64) []*pp.DebugAnnotation {
 	var res []*pp.DebugAnnotation
 	for i := range a {
 		name := &pp.DebugAnnotation_Name{Name: a[i].K}
-		value := &pp.DebugAnnotation_StringValue{StringValue: a[i].V}
-		res = append(res, &pp.DebugAnnotation{NameField: name, Value: value})
+		if debug.DisableInterning {
+			value := &pp.DebugAnnotation_StringValue{StringValue: a[i].V}
+			res = append(res, &pp.DebugAnnotation{NameField: name, Value: value})
+		} else {
+			iid, _ := iids[a[i].V]
+			value := &pp.DebugAnnotation_StringValueIid{StringValueIid: iid}
+			res = append(res, &pp.DebugAnnotation{NameField: name, Value: value})
+		}
 	}
 	return res
 }

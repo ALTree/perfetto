@@ -177,6 +177,9 @@ func TestManyEvents(t *testing.T) {
 }
 
 func TestAnnotations(t *testing.T) {
+	debug.DisableInterning = true
+	defer func() { debug.DisableInterning = false }()
+
 	trace := NewTrace()
 	trace.AddProcess(1, "process #1")
 	t1 := trace.AddThread(1, 2, "Thread #1")
