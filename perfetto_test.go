@@ -192,6 +192,25 @@ func TestAnnotations(t *testing.T) {
 	}
 }
 
+func TestFlows(t *testing.T) {
+	trace := NewTrace()
+	trace.AddProcess(1, "process #1")
+	t1 := trace.AddThread(1, 1, "Thread #1")
+
+	flows := []uint64{1, 2, 3}
+	trace.StartSliceWithFlow(t1, 100, "t1 func", flows)
+	trace.EndSliceWithFlow(t1, 150, flows)
+
+	tr := RoundTrip(t, trace)
+	AssertEq("trace length", t, len(tr.Packet), 4)
+	if got := EventFlows(tr.Packet[2]); !slices.Equal(got, flows) {
+		t.Errorf("For %s\ngot %v\nexp %v", "Flows", got, flows)
+	}
+	if got := EventFlows(tr.Packet[3]); !slices.Equal(got, flows) {
+		t.Errorf("For %s\ngot %v\nexp %v", "Flows", got, flows)
+	}
+}
+
 // ---- { testing helpers } --------------------------------
 
 func RoundTrip(t *testing.T, trace Trace) pp.Trace {
@@ -259,6 +278,10 @@ func EventType(p *pp.TracePacket) string {
 
 func EventTrackUuid(p *pp.TracePacket) uint64 {
 	return p.GetTrackEvent().GetTrackUuid()
+}
+
+func EventFlows(p *pp.TracePacket) []uint64 {
+	return p.GetTrackEvent().GetFlowIds()
 }
 
 func EventAnnotations(p *pp.TracePacket) []KV {

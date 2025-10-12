@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 
 	"github.com/ALTree/perfetto"
@@ -10,11 +11,12 @@ import (
 func main() {
 	trace := perfetto.NewTrace()
 	glb := perfetto.GlobalTrack()
-	trace.AddProcess(1, "Process #1")
-	t1 := trace.AddThread(1, 1, "Thread #1")
-	t2 := trace.AddThread(1, 2, "Thread #2")
-	t3 := trace.AddTrack("HTTP Request")
-	t4 := trace.AddTrack("HTTP Request")
+	trace.AddProcess(1, "Process")
+	t1 := trace.AddThread(1, 1, "Thread")
+	t2 := trace.AddThread(1, 2, "Thread")
+	t3 := trace.AddTrack("HTTP Requests")
+	t4 := trace.AddTrack("HTTP Requests")
+	t5 := trace.AddThread(1, 3, "Thread")
 	cpu := trace.AddCounter("cpu load", "%")
 
 	stack := []perfetto.KV{
@@ -23,11 +25,11 @@ func main() {
 		{"3", "func3"},
 	}
 
-	trace.StartSlice(t3, 100, "Request 1")
+	trace.StartSlice(t3, 100, "HTTP Request 1 /get")
 	trace.EndSlice(t3, 200)
-	trace.StartSlice(t4, 150, "Request 2")
+	trace.StartSlice(t4, 150, "HTTP Request 2 /post")
 	trace.EndSlice(t4, 250)
-	trace.StartSlice(t3, 230, "Request 3")
+	trace.StartSlice(t3, 230, "HTTP Request 3 /get")
 	trace.EndSlice(t3, 300)
 
 	for i := range uint64(50) {
@@ -47,7 +49,12 @@ func main() {
 		trace.EndSlice(t2, i*90+80)
 		trace.EndSlice(t2, i*90+80)
 
-		trace.NewValue(cpu, 100*i, int64(i))
+		trace.NewValue(cpu, 100*i, int64(rand.Intn(101)))
+	}
+
+	for i := range uint64(20) {
+		trace.StartSliceWithFlow(t5, i*100, "Function with flow", []uint64{i}, stack)
+		trace.EndSliceWithFlow(t5, i*100+50, []uint64{i - 1})
 	}
 
 	data, err := trace.Marshal()

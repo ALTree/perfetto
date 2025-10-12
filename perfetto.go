@@ -147,14 +147,16 @@ type Event struct {
 	IsCounter bool        // true iff Even is a TrackEvent_Counter
 	Value     int64       // set for TrackEvent_Counters
 	TrackUuid uint64      // Uuid of the track this event is part of
+	Flows     []uint64    // optional flows IDs
 	Ann       Annotations // optional Debug Annotations
 }
 
-func NewEvent(track Track, Type pp.TrackEvent_Type, ts uint64, name string, ann ...Annotations) Event {
+func NewEvent(track Track, Type pp.TrackEvent_Type, ts uint64, name string, flows []uint64, ann ...Annotations) Event {
 	e := Event{
 		Timestamp: ts,
 		Type:      Type,
 		Name:      name,
+		Flows:     flows,
 		TrackUuid: track.GetUuid(),
 	}
 	if len(ann) > 0 {
@@ -168,6 +170,7 @@ func (e Event) Emit(iid uint64) *pp.TracePacket_TrackEvent {
 		&pp.TrackEvent{
 			TrackUuid:        &e.TrackUuid,
 			Type:             &e.Type,
+			FlowIds:          e.Flows,
 			DebugAnnotations: e.Ann.Emit(),
 		},
 	}
@@ -293,15 +296,23 @@ func (t *Trace) AddEvent(e Event) {
 }
 
 func (t *Trace) InstantEvent(track Track, ts uint64, name string) {
-	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_INSTANT, ts, name))
+	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_INSTANT, ts, name, nil))
 }
 
 func (t *Trace) StartSlice(track Track, ts uint64, name string, ann ...Annotations) {
-	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name, ann...))
+	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name, nil, ann...))
+}
+
+func (t *Trace) StartSliceWithFlow(track Track, ts uint64, name string, flows []uint64, ann ...Annotations) {
+	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name, flows, ann...))
 }
 
 func (t *Trace) EndSlice(track Track, ts uint64) {
-	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_END, ts, ""))
+	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_END, ts, "", nil))
+}
+
+func (t *Trace) EndSliceWithFlow(track Track, ts uint64, flows []uint64) {
+	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_END, ts, "", flows))
 }
 
 func (t *Trace) NewValue(track Counter, ts uint64, val int64) {
