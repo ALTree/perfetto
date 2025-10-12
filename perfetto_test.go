@@ -61,7 +61,7 @@ func TestInstantEvent(t *testing.T) {
 	trace.AddProcess(1, "process #1")
 	thr := trace.AddThread(1, 2, "Thread #1")
 
-	trace.AddEvent(thr.InstantEvent(500, "Event #1"))
+	trace.InstantEvent(thr, 500, "Event #1")
 
 	tr := RoundTrip(t, trace)
 	AssertEq("trace length", t, len(tr.Packet), 3)
@@ -82,8 +82,8 @@ func TestSliceEvent(t *testing.T) {
 	trace.AddProcess(1, "process #1")
 	thr := trace.AddThread(1, 2, "Thread #1")
 
-	trace.AddEvent(thr.StartSlice(1000, "Slice #1"))
-	trace.AddEvent(thr.EndSlice(1500))
+	trace.StartSlice(thr, 1000, "Slice #1")
+	trace.EndSlice(thr, 1500)
 
 	tr := RoundTrip(t, trace)
 	AssertEq("trace length", t, len(tr.Packet), 4)
@@ -108,7 +108,7 @@ func TestCounter(t *testing.T) {
 	cpuload := trace.AddCounter("cpu load", "%")
 	AssertEq("Counter tracks", t, len(trace.Counters), 1)
 	for i := range uint64(10) {
-		trace.AddEvent(cpuload.NewValue(100*i, int64(10*i)))
+		trace.NewValue(cpuload, 100*i, int64(10*i))
 	}
 
 	tr := RoundTrip(t, trace)
@@ -135,11 +135,11 @@ func TestManyEvents(t *testing.T) {
 
 	for i := range uint64(100) {
 		if i%2 == 0 {
-			trace.AddEvent(thr1.StartSlice(i*100, "thr1 func"))
-			trace.AddEvent(thr1.EndSlice(i*100 + 50))
+			trace.StartSlice(thr1, i*100, "thr1 func")
+			trace.EndSlice(thr1, i*100+50)
 		} else {
-			trace.AddEvent(thr2.StartSlice(i*100, "thr2 func"))
-			trace.AddEvent(thr2.EndSlice(i*100 + 50))
+			trace.StartSlice(thr2, i*100, "thr2 func")
+			trace.EndSlice(thr2, i*100+50)
 		}
 	}
 
@@ -182,8 +182,8 @@ func TestAnnotations(t *testing.T) {
 	t1 := trace.AddThread(1, 2, "Thread #1")
 
 	ann := []KV{{"k1", "v1"}, {"k2", "v2"}, {"k3", "v3"}}
-	trace.AddEvent(t1.StartSlice(100, "t1 func", ann))
-	trace.AddEvent(t1.EndSlice(150))
+	trace.StartSlice(t1, 100, "t1 func", ann)
+	trace.EndSlice(t1, 150)
 
 	tr := RoundTrip(t, trace)
 	AssertEq("trace length", t, len(tr.Packet), 4)
