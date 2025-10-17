@@ -15,8 +15,8 @@ func TestAddBasicTrack(t *testing.T) {
 	trace.AddTrack("track #1")
 	tr := RoundTrip(t, trace)
 
-	AssertEq("trace length", t, len(tr.Packet), 1)
-	AssertEq("Name", t, BasicTrackName(tr.Packet[0]), "track #1")
+	AssertEq("trace length", t, len(tr.Packet), 2)
+	AssertEq("Name", t, BasicTrackName(tr.Packet[1]), "track #1")
 }
 
 // Adding a single process to the trace
@@ -25,9 +25,9 @@ func TestAddProcess(t *testing.T) {
 	trace.AddProcess(1, "process #6")
 	tr := RoundTrip(t, trace)
 
-	AssertEq("trace length", t, len(tr.Packet), 1)
-	AssertEq("Name", t, ProcessName(tr.Packet[0]), "process #6")
-	AssertEq("Pid", t, ProcessPid(tr.Packet[0]), 1)
+	AssertEq("trace length", t, len(tr.Packet), 2)
+	AssertEq("Name", t, ProcessName(tr.Packet[1]), "process #6")
+	AssertEq("Pid", t, ProcessPid(tr.Packet[1]), 1)
 }
 
 // Adding a process and a few threads to the trace
@@ -39,9 +39,9 @@ func TestAddThread(t *testing.T) {
 	tr := RoundTrip(t, trace)
 
 	AssertEq("len(Threads)", t, len(trace.Threads), 2)
-	AssertEq("trace length", t, len(tr.Packet), 3)
+	AssertEq("trace length", t, len(tr.Packet), 4)
 
-	t1, t2 := tr.Packet[1], tr.Packet[2]
+	t1, t2 := tr.Packet[2], tr.Packet[3]
 	AssertEq("Thread #1 Name", t, ThreadName(t1), "thread #1")
 	AssertEq("Thread #1 Tid", t, ThreadTid(t1), 20)
 	AssertEq("Thread #1 Pid", t, ThreadPid(t1), 1)
@@ -60,9 +60,10 @@ func TestAddManyThreads(t *testing.T) {
 	tr := RoundTrip(t, trace)
 
 	AssertEq("len(Threads)", t, len(trace.Threads), 100)
-	AssertEq("trace length", t, len(tr.Packet), 101)
+	AssertEq("trace length", t, len(tr.Packet), 102)
+	packets := tr.Packet[2:]
 	for i := range int32(100) {
-		tr := tr.Packet[i+1]
+		tr := packets[i]
 		AssertEq("Thread Name", t, ThreadName(tr), fmt.Sprintf("Thread #%v", i))
 		AssertEq("Thread Tid", t, ThreadTid(tr), i)
 		AssertEq("Thread Pid", t, ThreadPid(tr), 1)
@@ -79,17 +80,17 @@ func TestInstantEvent(t *testing.T) {
 	trace.InstantEvent(t1, 1000, "Thread Instant Event")
 
 	tr := RoundTrip(t, trace)
-	AssertEq("trace length", t, len(tr.Packet), 4)
+	AssertEq("trace length", t, len(tr.Packet), 5)
 
-	pe := tr.Packet[2]
+	pe := tr.Packet[3]
 	AssertEq("Timestamp", t, EventTimestamp(pe), 500)
 	AssertEq("Name", t, EventName(pe), "")
 	AssertNeq("Name", t, EventNameIid(pe), 0)
 	AssertEq("Type", t, EventType(pe), "TYPE_INSTANT")
 	AssertEq("Track UUID", t, EventTrackUuid(pe), p.Uuid)
 
-	te := tr.Packet[3]
-	AssertEq("Timestamp", t, EventTimestamp(te), 1000)
+	te := tr.Packet[4]
+	AssertEq("Timestamp", t, EventTimestamp(te), 500) // incremental
 	AssertEq("Name", t, EventName(te), "")
 	AssertNeq("Name", t, EventNameIid(te), 0)
 	AssertEq("Type", t, EventType(te), "TYPE_INSTANT")
@@ -98,8 +99,7 @@ func TestInstantEvent(t *testing.T) {
 
 // Adding a Slice Event (to process and to Thread)
 func TestSliceEvent(t *testing.T) {
-	//trace := NewTrace(Features{Interning: false})
-	trace := NewTrace()
+	trace := NewTrace(Features{Interning: true, IncrementalTS: false})
 	p := trace.AddProcess(1, "process #1")
 	t1 := trace.AddThread(1, 1, "Thread #1")
 
@@ -140,7 +140,7 @@ func TestSliceEvent(t *testing.T) {
 
 // Adding a Counter track
 func TestCounter(t *testing.T) {
-	trace := NewTrace()
+	trace := NewTrace(Features{Interning: true, IncrementalTS: false})
 	trace.AddProcess(1, "process #1")
 	cpuload := trace.AddCounter("cpu load", "%")
 
@@ -200,8 +200,107 @@ func AddManyEvents(t *testing.T, feat ...Features) Trace {
 	return trace
 }
 
-func TestManyEventsDefaultFeatures(t *testing.T) {
+func TestManyEvents(t *testing.T) {
+	t.Run("DefaultFeatures", ManyEventsDefaultFeatures)
+	t.Run("NoInterning", ManyEventsNoInterning)
+	t.Run("FullTimestamps", ManyEventsFullTimestamps)
+}
+
+func ManyEventsDefaultFeatures(t *testing.T) {
 	trace := AddManyEvents(t)
+	tr := RoundTrip(t, trace)
+	AssertEq("trace length", t, len(tr.Packet), 4+2*100+10)
+
+	// Check slice events
+	packets := tr.Packet[4:]
+	for i := range uint64(200) {
+		p := packets[i]
+		ts, typ := func() (uint64, string) {
+			switch i % 4 {
+			case 0:
+				var gap = uint64(50)
+				if i == 0 {
+					gap = 0
+				}
+				return gap, "TYPE_SLICE_BEGIN"
+			case 1:
+				return 50, "TYPE_SLICE_END"
+			case 2:
+				return 50, "TYPE_SLICE_BEGIN"
+			default:
+				return 50, "TYPE_SLICE_END"
+			}
+		}()
+		AssertEq("Timestamp", t, EventTimestamp(p), ts)
+		AssertEq("Name", t, EventName(p), "") // names are interned
+		if typ == "TYPE_SLICE_BEGIN" {
+			AssertNeq("NameIid", t, EventNameIid(p), 0)
+		}
+		AssertEq("Type", t, EventType(p), typ)
+	}
+
+	// Check Instant events
+	packets = tr.Packet[4+200:]
+	for i := range uint64(10) {
+		p := packets[i]
+		// These instant events have timestamps smaller than
+		// Trace.LastTimestamp, so we expect Emit() to give up
+		// emitting incremental timestamps, and use the default clock.
+		AssertEq("Timestamp", t, EventTimestamp(p), 100*i)
+		AssertEq("Name", t, EventName(p), "") // names are interned
+		AssertNeq("NameIid", t, EventNameIid(p), 0)
+		AssertEq("Type", t, EventType(p), "TYPE_INSTANT")
+	}
+}
+
+func ManyEventsNoInterning(t *testing.T) {
+	feat := DefaultFeatures
+	feat.Interning = false
+	trace := AddManyEvents(t, feat)
+	tr := RoundTrip(t, trace)
+	AssertEq("trace length", t, len(tr.Packet), 4+2*100+10)
+
+	// Check slice events
+	packets := tr.Packet[4:]
+	for i := range uint64(200) {
+		p := packets[i]
+		ts, typ, name := func() (uint64, string, string) {
+			switch i % 4 {
+			case 0:
+				var gap = uint64(50)
+				if i == 0 {
+					gap = 0
+				}
+				return gap, "TYPE_SLICE_BEGIN", "t1 func"
+			case 1:
+				return 50, "TYPE_SLICE_END", ""
+			case 2:
+				return 50, "TYPE_SLICE_BEGIN", "t2 func"
+			default:
+				return 50, "TYPE_SLICE_END", ""
+			}
+		}()
+		AssertEq("Timestamp", t, EventTimestamp(p), ts)
+		AssertEq("Name", t, EventName(p), name)
+		AssertEq("NameIid", t, EventNameIid(p), 0) // no interning
+		AssertEq("Type", t, EventType(p), typ)
+	}
+
+	// Check Instant events
+	packets = tr.Packet[4+200:]
+	for i := range uint64(10) {
+		p := packets[i]
+		AssertEq("Timestamp", t, EventTimestamp(p), 100*i)
+		AssertEq("Name", t, EventName(p), "Instant event")
+		AssertEq("NameIid", t, EventNameIid(p), 0) // no interning
+		AssertEq("Type", t, EventType(p), "TYPE_INSTANT")
+	}
+}
+
+func ManyEventsFullTimestamps(t *testing.T) {
+	feat := DefaultFeatures
+	feat.IncrementalTS = false
+	trace := AddManyEvents(t, feat)
 	tr := RoundTrip(t, trace)
 	AssertEq("trace length", t, len(tr.Packet), 3+2*100+10)
 
@@ -241,45 +340,6 @@ func TestManyEventsDefaultFeatures(t *testing.T) {
 	}
 }
 
-func TestManyEventsNoInterning(t *testing.T) {
-	trace := AddManyEvents(t, Features{Interning: false})
-	tr := RoundTrip(t, trace)
-	AssertEq("trace length", t, len(tr.Packet), 3+2*100+10)
-
-	// Check slice events
-	packets := tr.Packet[3:]
-	for i := range uint64(200) {
-		p := packets[i]
-		ts, typ, name := func() (uint64, string, string) {
-			j := i / 2
-			switch i % 4 {
-			case 0:
-				return j * 100, "TYPE_SLICE_BEGIN", "t1 func"
-			case 1:
-				return j*100 + 50, "TYPE_SLICE_END", ""
-			case 2:
-				return j * 100, "TYPE_SLICE_BEGIN", "t2 func"
-			default:
-				return j*100 + 50, "TYPE_SLICE_END", ""
-			}
-		}()
-		AssertEq("Timestamp", t, EventTimestamp(p), ts)
-		AssertEq("Name", t, EventName(p), name)
-		AssertEq("NameIid", t, EventNameIid(p), 0) // no interning
-		AssertEq("Type", t, EventType(p), typ)
-	}
-
-	// Check Instant events
-	packets = tr.Packet[3+200:]
-	for i := range uint64(10) {
-		p := packets[i]
-		AssertEq("Timestamp", t, EventTimestamp(p), 100*i)
-		AssertEq("Name", t, EventName(p), "Instant event")
-		AssertEq("NameIid", t, EventNameIid(p), 0) // no interning
-		AssertEq("Type", t, EventType(p), "TYPE_INSTANT")
-	}
-}
-
 func TestAnnotations(t *testing.T) {
 	trace := NewTrace(Features{Interning: false})
 	trace.AddProcess(1, "process #1")
@@ -306,11 +366,11 @@ func TestFlows(t *testing.T) {
 	trace.EndSliceWithFlow(t1, 150, flows)
 
 	tr := RoundTrip(t, trace)
-	AssertEq("trace length", t, len(tr.Packet), 4)
-	if got := EventFlows(tr.Packet[2]); !slices.Equal(got, flows) {
+	AssertEq("trace length", t, len(tr.Packet), 5)
+	if got := EventFlows(tr.Packet[3]); !slices.Equal(got, flows) {
 		t.Errorf("For %s\ngot %v\nexp %v", "Flows", got, flows)
 	}
-	if got := EventFlows(tr.Packet[3]); !slices.Equal(got, flows) {
+	if got := EventFlows(tr.Packet[4]); !slices.Equal(got, flows) {
 		t.Errorf("For %s\ngot %v\nexp %v", "Flows", got, flows)
 	}
 }

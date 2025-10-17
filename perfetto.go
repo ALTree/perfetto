@@ -11,6 +11,9 @@ import (
 // Common Trusted Packet Sequence ID
 const TPSID = 1
 
+// Clock ID for incremental timestamps
+const CustomClockID uint32 = 64
+
 // A Track is anything with a Name and a Uuid
 type Track interface {
 	GetName() string
@@ -191,19 +194,52 @@ func (e Event) Emit(tr *Trace) *pp.TracePacket_TrackEvent {
 	return te
 }
 
+// -- { Clock Snapshot  } --------------------------------
+
+// Returns a packet that can be emitted on the track to enable incremental timestamps
+func EmitClockSnapshot() *pp.TracePacket {
+	boottimeClockId := uint32(pp.BuiltinClock_BUILTIN_CLOCK_BOOTTIME)
+	return &pp.TracePacket{
+		Data: &pp.TracePacket_ClockSnapshot{
+			&pp.ClockSnapshot{
+				Clocks: []*pp.ClockSnapshot_Clock{
+					{
+						ClockId:   &boottimeClockId,
+						Timestamp: proto.Uint64(0),
+					},
+					{
+						ClockId:       proto.Uint32(CustomClockID),
+						Timestamp:     proto.Uint64(0),
+						IsIncremental: proto.Bool(true),
+					},
+				},
+			},
+		},
+		OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{TPSID},
+	}
+
+}
+
 // -- { Trace } --------------------------------
 
 type Trace struct {
 	Threads  map[int32]Thread   // Thread tracks added to the trace
 	Counters map[string]Counter // Counter tracks added to the trace
 
-	pt        pp.Trace
-	features  Features
-	interning Interning
+	pt            pp.Trace
+	features      Features
+	interning     Interning // interning maps (used if features.Interning)
+	lastTimestamp uint64    // for incremental timestmaps (used if features.IncrementalTS)
 }
 
 type Features struct {
-	Interning bool
+	Interning     bool // Use string interninng
+	IncrementalTS bool // Emit incremental timestamp
+}
+
+var DefaultFeatures = Features{
+	Interning:     true,
+	IncrementalTS: true,
 }
 
 type Interning struct {
@@ -225,12 +261,16 @@ func NewTrace(features ...Features) Trace {
 		},
 	}
 
-	defaultFeatures := Features{Interning: true}
 	if len(features) > 0 {
 		tr.features = features[0]
 	} else {
-		tr.features = defaultFeatures
+		tr.features = DefaultFeatures
 	}
+
+	if tr.features.IncrementalTS {
+		tr.pt.Packet = append(tr.pt.Packet, EmitClockSnapshot())
+	}
+
 	return tr
 }
 
@@ -310,9 +350,21 @@ func (t *Trace) AddEvent(e Event) {
 	}
 
 	tp := &pp.TracePacket{
-		Timestamp:                       &e.Timestamp,
 		Data:                            e.Emit(t),
 		OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{TPSID},
+	}
+
+	// We emit an incremental timestamp if 1) the feature is enabled
+	// and 2) the delta since the last timestamp is positive. If (2)
+	// is not true, emit the event on the default, non-incremental
+	// clock to avoid a wraparound on the uint64 delta.
+	if t.features.IncrementalTS && e.Timestamp >= t.lastTimestamp {
+		delta := e.Timestamp - t.lastTimestamp
+		t.lastTimestamp = e.Timestamp
+		tp.Timestamp = &delta
+		tp.TimestampClockId = proto.Uint32(CustomClockID)
+	} else {
+		tp.Timestamp = &e.Timestamp
 	}
 
 	// In addition to this Event's data, emit the interning data
