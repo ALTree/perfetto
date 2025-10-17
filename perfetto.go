@@ -9,7 +9,7 @@ import (
 )
 
 // Common Trusted Packet Sequence ID
-const TPSID = 99
+const TPSID = 1
 
 // A Track is anything with a Name and a Uuid
 type Track interface {
