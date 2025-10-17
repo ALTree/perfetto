@@ -165,23 +165,23 @@ func NewEvent(track Track, Type pp.TrackEvent_Type, ts uint64, name string, flow
 	return e
 }
 
-func (e Event) Emit(int Interning) *pp.TracePacket_TrackEvent {
+func (e Event) Emit(tr *Trace) *pp.TracePacket_TrackEvent {
 	te := &pp.TracePacket_TrackEvent{
 		&pp.TrackEvent{
 			TrackUuid:        &e.TrackUuid,
 			Type:             &e.Type,
 			FlowIds:          e.Flows,
-			DebugAnnotations: e.Ann.Emit(int.AnnValues),
+			DebugAnnotations: e.Ann.Emit(tr),
 		},
 	}
 
-	if debug.DisableInterning {
+	if tr.features.Interning {
+		iid, _ := tr.interning.EventNames[e.Name]
+		te.TrackEvent.NameField = &pp.TrackEvent_NameIid{iid}
+	} else {
 		if e.Name != "" {
 			te.TrackEvent.NameField = &pp.TrackEvent_Name{e.Name}
 		}
-	} else {
-		iid, _ := int.EventNames[e.Name]
-		te.TrackEvent.NameField = &pp.TrackEvent_NameIid{iid}
 	}
 
 	if e.IsCounter {
@@ -198,7 +198,12 @@ type Trace struct {
 	Counters map[string]Counter // Counter tracks added to the trace
 
 	pt        pp.Trace
+	features  Features
 	interning Interning
+}
+
+type Features struct {
+	Interning bool
 }
 
 type Interning struct {
@@ -208,8 +213,8 @@ type Interning struct {
 	NextAnnId  uint64
 }
 
-func NewTrace() Trace {
-	return Trace{
+func NewTrace(features ...Features) Trace {
+	tr := Trace{
 		Threads:  make(map[int32]Thread),
 		Counters: make(map[string]Counter),
 		interning: Interning{
@@ -219,6 +224,14 @@ func NewTrace() Trace {
 			NextAnnId:  1,
 		},
 	}
+
+	defaultFeatures := Features{Interning: true}
+	if len(features) > 0 {
+		tr.features = features[0]
+	} else {
+		tr.features = defaultFeatures
+	}
+	return tr
 }
 
 // AddTrack adds a BasicTrack with the given name to the trace. It
@@ -264,7 +277,7 @@ func (t *Trace) AddEvent(e Event) {
 
 	var internedData *pp.InternedData
 
-	if !debug.DisableInterning {
+	if t.features.Interning {
 		// Event Names Interning
 		if _, ok := t.interning.EventNames[e.Name]; !ok && e.Name != "" {
 			iid := t.interning.NextNameId
@@ -298,7 +311,7 @@ func (t *Trace) AddEvent(e Event) {
 
 	tp := &pp.TracePacket{
 		Timestamp:                       &e.Timestamp,
-		Data:                            e.Emit(t.interning),
+		Data:                            e.Emit(t),
 		OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{TPSID},
 	}
 
@@ -314,7 +327,7 @@ func (t *Trace) AddEvent(e Event) {
 		}
 	} else {
 		// Later packets using interned data need to set this
-		if !debug.DisableInterning {
+		if t.features.Interning {
 			tp.SequenceFlags = proto.Uint32(uint32(
 				pp.TracePacket_SEQ_NEEDS_INCREMENTAL_STATE))
 		}
@@ -372,24 +385,19 @@ type KV struct {
 
 type Annotations []KV
 
-func (a Annotations) Emit(iids map[string]uint64) []*pp.DebugAnnotation {
+func (a Annotations) Emit(tr *Trace) []*pp.DebugAnnotation {
+	iids := tr.interning.AnnValues
 	var res []*pp.DebugAnnotation
 	for i := range a {
 		name := &pp.DebugAnnotation_Name{Name: a[i].K}
-		if debug.DisableInterning {
-			value := &pp.DebugAnnotation_StringValue{StringValue: a[i].V}
-			res = append(res, &pp.DebugAnnotation{NameField: name, Value: value})
-		} else {
+		if tr.features.Interning {
 			iid, _ := iids[a[i].V]
 			value := &pp.DebugAnnotation_StringValueIid{StringValueIid: iid}
+			res = append(res, &pp.DebugAnnotation{NameField: name, Value: value})
+		} else {
+			value := &pp.DebugAnnotation_StringValue{StringValue: a[i].V}
 			res = append(res, &pp.DebugAnnotation{NameField: name, Value: value})
 		}
 	}
 	return res
-}
-
-var debug = struct {
-	DisableInterning bool
-}{
-	DisableInterning: false,
 }
