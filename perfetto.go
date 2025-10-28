@@ -3,9 +3,7 @@ package perfetto
 import (
 	"math/rand/v2"
 
-	"google.golang.org/protobuf/proto"
-
-	pp "github.com/ALTree/perfetto/internal/proto"
+	"github.com/ALTree/perfetto/internal/protoencoder"
 )
 
 // Common Trusted Packet Sequence ID
@@ -44,13 +42,9 @@ func NewTrack(name string) BasicTrack {
 	}
 }
 
-func (t BasicTrack) Emit() *pp.TracePacket_TrackDescriptor {
-	return &pp.TracePacket_TrackDescriptor{
-		&pp.TrackDescriptor{
-			Uuid:                &t.Uuid,
-			StaticOrDynamicName: &pp.TrackDescriptor_Name{Name: t.Name},
-		},
-	}
+func (t BasicTrack) encodeTrackDescriptor(enc *protoencoder.Encoder) {
+	enc.WriteUint64(protoencoder.TrackDescriptorFieldUuid, &t.Uuid)
+	enc.WriteString(protoencoder.TrackDescriptorFieldName, &t.Name)
 }
 
 // The global track
@@ -73,15 +67,12 @@ func NewProcess(pid int32, name string) Process {
 	}
 }
 
-func (p Process) Emit() *pp.TracePacket_TrackDescriptor {
-	return &pp.TracePacket_TrackDescriptor{
-		&pp.TrackDescriptor{
-			Uuid: &p.Uuid,
-			Process: &pp.ProcessDescriptor{
-				Pid:         &p.Pid,
-				ProcessName: &p.Name,
-			}},
-	}
+func (p Process) encodeTrackDescriptor(enc *protoencoder.Encoder) {
+	enc.WriteUint64(protoencoder.TrackDescriptorFieldUuid, &p.Uuid)
+	enc.WriteMessage(protoencoder.TrackDescriptorFieldProcess, func(e *protoencoder.Encoder) {
+		e.WriteInt32(protoencoder.ProcessDescriptorFieldPid, &p.Pid)
+		e.WriteString(protoencoder.ProcessDescriptorFieldProcessName, &p.Name)
+	})
 }
 
 // -- { Thread } --------------------------------
@@ -101,16 +92,13 @@ func NewThread(pid, tid int32, name string) Thread {
 	}
 }
 
-func (t Thread) Emit() *pp.TracePacket_TrackDescriptor {
-	return &pp.TracePacket_TrackDescriptor{
-		&pp.TrackDescriptor{
-			Uuid: &t.Uuid,
-			Thread: &pp.ThreadDescriptor{
-				Pid:        &t.Pid,
-				Tid:        &t.Tid,
-				ThreadName: &t.Name,
-			}},
-	}
+func (t Thread) encodeTrackDescriptor(enc *protoencoder.Encoder) {
+	enc.WriteUint64(protoencoder.TrackDescriptorFieldUuid, &t.Uuid)
+	enc.WriteMessage(protoencoder.TrackDescriptorFieldThread, func(e *protoencoder.Encoder) {
+		e.WriteInt32(protoencoder.ThreadDescriptorFieldPid, &t.Pid)
+		e.WriteInt32(protoencoder.ThreadDescriptorFieldTid, &t.Tid)
+		e.WriteString(protoencoder.ThreadDescriptorFieldThreadName, &t.Name)
+	})
 }
 
 // -- { Counter } --------------------------------
@@ -128,16 +116,12 @@ func NewCounter(name, unit string) Counter {
 	}
 }
 
-func (c Counter) Emit() *pp.TracePacket_TrackDescriptor {
-	return &pp.TracePacket_TrackDescriptor{
-		&pp.TrackDescriptor{
-			Uuid:                &c.Uuid,
-			StaticOrDynamicName: &pp.TrackDescriptor_Name{c.Name},
-			Counter: &pp.CounterDescriptor{
-				UnitName: proto.String(c.Unit),
-			},
-		},
-	}
+func (c Counter) encodeTrackDescriptor(enc *protoencoder.Encoder) {
+	enc.WriteUint64(protoencoder.TrackDescriptorFieldUuid, &c.Uuid)
+	enc.WriteString(protoencoder.TrackDescriptorFieldName, &c.Name)
+	enc.WriteMessage(protoencoder.TrackDescriptorFieldCounter, func(e *protoencoder.Encoder) {
+		e.WriteString(protoencoder.CounterDescriptorFieldUnitName, &c.Unit)
+	})
 }
 
 // -- { Event } --------------------------------
@@ -146,7 +130,7 @@ func (c Counter) Emit() *pp.TracePacket_TrackDescriptor {
 type Event struct {
 	Timestamp uint64
 	Name      string
-	Type      pp.TrackEvent_Type
+	Type      int32       // TrackEvent_Type enum value
 	IsCounter bool        // true iff Even is a TrackEvent_Counter
 	Value     int64       // set for TrackEvent_Counters
 	TrackUuid uint64      // Uuid of the track this event is part of
@@ -154,10 +138,10 @@ type Event struct {
 	Ann       Annotations // optional Debug Annotations
 }
 
-func NewEvent(track Track, Type pp.TrackEvent_Type, ts uint64, name string, flows []uint64, ann ...Annotations) Event {
+func NewEvent(track Track, eventType int32, ts uint64, name string, flows []uint64, ann ...Annotations) Event {
 	e := Event{
 		Timestamp: ts,
-		Type:      Type,
+		Type:      eventType,
 		Name:      name,
 		Flows:     flows,
 		TrackUuid: track.GetUuid(),
@@ -168,56 +152,58 @@ func NewEvent(track Track, Type pp.TrackEvent_Type, ts uint64, name string, flow
 	return e
 }
 
-func (e Event) Emit(tr *Trace) *pp.TracePacket_TrackEvent {
-	te := &pp.TracePacket_TrackEvent{
-		&pp.TrackEvent{
-			TrackUuid:        &e.TrackUuid,
-			Type:             &e.Type,
-			FlowIds:          e.Flows,
-			DebugAnnotations: e.Ann.Emit(tr),
-		},
-	}
+func (e Event) encodeTrackEvent(enc *protoencoder.Encoder, tr *Trace) {
+	enc.WriteEnum(protoencoder.TrackEventFieldType, &e.Type)
+	enc.WriteUint64(protoencoder.TrackEventFieldTrackUuid, &e.TrackUuid)
 
 	if tr.features.Interning {
 		iid, _ := tr.interning.EventNames[e.Name]
-		te.TrackEvent.NameField = &pp.TrackEvent_NameIid{iid}
+		enc.WriteUint64(protoencoder.TrackEventFieldNameIid, &iid)
 	} else {
 		if e.Name != "" {
-			te.TrackEvent.NameField = &pp.TrackEvent_Name{e.Name}
+			enc.WriteString(protoencoder.TrackEventFieldName, &e.Name)
 		}
 	}
 
 	if e.IsCounter {
-		te.TrackEvent.CounterValueField = &pp.TrackEvent_CounterValue{e.Value}
+		enc.WriteInt64(protoencoder.TrackEventFieldCounterValue, &e.Value)
 	}
 
-	return te
+	// Write flow IDs (repeated fixed64)
+	if len(e.Flows) > 0 {
+		enc.WriteRepeatedFixed64(protoencoder.TrackEventFieldFlowIds, e.Flows)
+	}
+
+	// Write debug annotations
+	e.Ann.encode(enc, tr)
 }
 
 // -- { Clock Snapshot  } --------------------------------
 
-// Returns a packet that can be emitted on the track to enable incremental timestamps
-func EmitClockSnapshot() *pp.TracePacket {
-	boottimeClockId := uint32(pp.BuiltinClock_BUILTIN_CLOCK_BOOTTIME)
-	return &pp.TracePacket{
-		Data: &pp.TracePacket_ClockSnapshot{
-			&pp.ClockSnapshot{
-				Clocks: []*pp.ClockSnapshot_Clock{
-					{
-						ClockId:   &boottimeClockId,
-						Timestamp: proto.Uint64(0),
-					},
-					{
-						ClockId:       proto.Uint32(CustomClockID),
-						Timestamp:     proto.Uint64(0),
-						IsIncremental: proto.Bool(true),
-					},
-				},
-			},
-		},
-		OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{TPSID},
-	}
+// emitClockSnapshot emits a global ClockSnapshot packet to enable incremental timestamps
+func (t *Trace) emitClockSnapshot() {
+	boottimeClockId := uint32(protoencoder.BuiltinClockBoottime)
+	customClockId := uint32(CustomClockID)
+	isIncremental := true
+	timestamp := uint64(0)
+	seqId := uint32(TPSID)
 
+	t.buf.WriteMessage(protoencoder.TraceFieldPacket, func(packet *protoencoder.Encoder) {
+		packet.WriteUint32(protoencoder.TracePacketFieldTrustedPacketSequenceId, &seqId)
+		packet.WriteMessage(protoencoder.TracePacketFieldClockSnapshot, func(snapshot *protoencoder.Encoder) {
+			// BOOTTIME clock
+			snapshot.WriteMessage(protoencoder.ClockSnapshotFieldClocks, func(clock *protoencoder.Encoder) {
+				clock.WriteUint32(protoencoder.ClockFieldClockId, &boottimeClockId)
+				clock.WriteUint64(protoencoder.ClockFieldTimestamp, &timestamp)
+			})
+			// Custom incremental clock
+			snapshot.WriteMessage(protoencoder.ClockSnapshotFieldClocks, func(clock *protoencoder.Encoder) {
+				clock.WriteUint32(protoencoder.ClockFieldClockId, &customClockId)
+				clock.WriteUint64(protoencoder.ClockFieldTimestamp, &timestamp)
+				clock.WriteBool(protoencoder.ClockFieldIsIncremental, &isIncremental)
+			})
+		})
+	})
 }
 
 // -- { Trace } --------------------------------
@@ -226,7 +212,7 @@ type Trace struct {
 	Threads  map[int32]Thread   // Thread tracks added to the trace
 	Counters map[string]Counter // Counter tracks added to the trace
 
-	pt            pp.Trace
+	buf           *protoencoder.Encoder // Buffer for encoding the entire trace
 	features      Features
 	interning     Interning // interning maps (used if features.Interning)
 	lastTimestamp uint64    // for incremental timestmaps (used if features.IncrementalTS)
@@ -253,6 +239,7 @@ func NewTrace(features ...Features) Trace {
 	tr := Trace{
 		Threads:  make(map[int32]Thread),
 		Counters: make(map[string]Counter),
+		buf:      protoencoder.NewEncoder(),
 		interning: Interning{
 			EventNames: make(map[string]uint64),
 			NextNameId: 1,
@@ -268,7 +255,7 @@ func NewTrace(features ...Features) Trace {
 	}
 
 	if tr.features.IncrementalTS {
-		tr.pt.Packet = append(tr.pt.Packet, EmitClockSnapshot())
+		tr.emitClockSnapshot()
 	}
 
 	return tr
@@ -279,7 +266,13 @@ func NewTrace(features ...Features) Trace {
 // track.
 func (t *Trace) AddTrack(name string) BasicTrack {
 	tr := NewTrack(name)
-	t.pt.Packet = append(t.pt.Packet, &pp.TracePacket{Data: tr.Emit()})
+
+	// Write TracePacket containing TrackDescriptor directly to trace buffer
+	t.buf.WriteMessage(protoencoder.TraceFieldPacket, func(packet *protoencoder.Encoder) {
+		packet.WriteMessage(protoencoder.TracePacketFieldTrackDescriptor, func(desc *protoencoder.Encoder) {
+			tr.encodeTrackDescriptor(desc)
+		})
+	})
 	return tr
 }
 
@@ -288,7 +281,13 @@ func (t *Trace) AddTrack(name string) BasicTrack {
 // process.
 func (t *Trace) AddProcess(pid int32, name string) Process {
 	pr := NewProcess(pid, name)
-	t.pt.Packet = append(t.pt.Packet, &pp.TracePacket{Data: pr.Emit()})
+
+	// Write TracePacket containing TrackDescriptor directly to trace buffer
+	t.buf.WriteMessage(protoencoder.TraceFieldPacket, func(packet *protoencoder.Encoder) {
+		packet.WriteMessage(protoencoder.TracePacketFieldTrackDescriptor, func(desc *protoencoder.Encoder) {
+			pr.encodeTrackDescriptor(desc)
+		})
+	})
 	return pr
 }
 
@@ -297,7 +296,13 @@ func (t *Trace) AddProcess(pid int32, name string) Process {
 // be used to associate events to the thread.
 func (t *Trace) AddThread(pid, tid int32, name string) Thread {
 	tr := NewThread(pid, tid, name)
-	t.pt.Packet = append(t.pt.Packet, &pp.TracePacket{Data: tr.Emit()})
+
+	// Write TracePacket containing TrackDescriptor directly to trace buffer
+	t.buf.WriteMessage(protoencoder.TraceFieldPacket, func(packet *protoencoder.Encoder) {
+		packet.WriteMessage(protoencoder.TracePacketFieldTrackDescriptor, func(desc *protoencoder.Encoder) {
+			tr.encodeTrackDescriptor(desc)
+		})
+	})
 	t.Threads[tid] = tr
 	return tr
 }
@@ -307,7 +312,13 @@ func (t *Trace) AddThread(pid, tid int32, name string) Thread {
 // track.
 func (t *Trace) AddCounter(name, unit string) Counter {
 	ct := NewCounter(name, unit)
-	t.pt.Packet = append(t.pt.Packet, &pp.TracePacket{Data: ct.Emit()})
+
+	// Write TracePacket containing TrackDescriptor directly to trace buffer
+	t.buf.WriteMessage(protoencoder.TraceFieldPacket, func(packet *protoencoder.Encoder) {
+		packet.WriteMessage(protoencoder.TracePacketFieldTrackDescriptor, func(desc *protoencoder.Encoder) {
+			ct.encodeTrackDescriptor(desc)
+		})
+	})
 	t.Counters[name] = ct
 	return ct
 }
@@ -315,103 +326,118 @@ func (t *Trace) AddCounter(name, unit string) Counter {
 // AddEvent adds the given event to the trace.
 func (t *Trace) AddEvent(e Event) {
 
-	var internedData *pp.InternedData
+	var hasEventNameInterning bool
+	var annStringValues []struct{ iid uint64; str []byte }
 
 	if t.features.Interning {
 		// Event Names Interning
 		if _, ok := t.interning.EventNames[e.Name]; !ok && e.Name != "" {
 			iid := t.interning.NextNameId
-			internedData = &pp.InternedData{
-				EventNames: []*pp.EventName{
-					&pp.EventName{Iid: &iid, Name: &e.Name},
-				},
-			}
 			t.interning.EventNames[e.Name] = iid
 			t.interning.NextNameId++
+			hasEventNameInterning = true
 		}
 
 		// Debug Annotations Values Interning
-		var arr []*pp.InternedString
 		for _, ann := range e.Ann {
-			iid, ok := t.interning.AnnValues[ann.V]
+			_, ok := t.interning.AnnValues[ann.V]
 			if !ok && ann.V != "" {
-				iid = t.interning.NextAnnId
-				arr = append(arr, &pp.InternedString{Iid: &iid, Str: []byte(ann.V)})
+				iid := t.interning.NextAnnId
+				annStringValues = append(annStringValues, struct{ iid uint64; str []byte }{iid, []byte(ann.V)})
 				t.interning.AnnValues[ann.V] = iid
 				t.interning.NextAnnId++
 			}
 		}
-		if len(arr) > 0 {
-			if internedData == nil {
-				internedData = &pp.InternedData{}
+	}
+
+	seqId := uint32(TPSID)
+
+	// Write TracePacket directly to trace buffer
+	t.buf.WriteMessage(protoencoder.TraceFieldPacket, func(packet *protoencoder.Encoder) {
+		// We emit an incremental timestamp if 1) the feature is enabled
+		// and 2) the delta since the last timestamp is positive. If (2)
+		// is not true, emit the event on the default, non-incremental
+		// clock to avoid a wraparound on the uint64 delta.
+		var timestamp uint64
+		if t.features.IncrementalTS && e.Timestamp >= t.lastTimestamp {
+			delta := e.Timestamp - t.lastTimestamp
+			t.lastTimestamp = e.Timestamp
+			timestamp = delta
+			customClockId := uint32(CustomClockID)
+			packet.WriteUint64(protoencoder.TracePacketFieldTimestamp, &timestamp)
+			packet.WriteUint32(protoencoder.TracePacketFieldTimestampClockId, &customClockId)
+		} else {
+			timestamp = e.Timestamp
+			packet.WriteUint64(protoencoder.TracePacketFieldTimestamp, &timestamp)
+		}
+
+		packet.WriteUint32(protoencoder.TracePacketFieldTrustedPacketSequenceId, &seqId)
+
+		// Encode TrackEvent
+		packet.WriteMessage(protoencoder.TracePacketFieldTrackEvent, func(trackEvent *protoencoder.Encoder) {
+			e.encodeTrackEvent(trackEvent, t)
+		})
+
+		// Encode interning data if needed
+		if hasEventNameInterning || len(annStringValues) > 0 {
+			packet.WriteMessage(protoencoder.TracePacketFieldInternedData, func(internedData *protoencoder.Encoder) {
+				if hasEventNameInterning {
+					internedData.WriteMessage(protoencoder.InternedDataFieldEventNames, func(eventName *protoencoder.Encoder) {
+						iid := t.interning.EventNames[e.Name]
+						eventName.WriteUint64(protoencoder.EventNameFieldIid, &iid)
+						eventName.WriteString(protoencoder.EventNameFieldName, &e.Name)
+					})
+				}
+
+				for _, ann := range annStringValues {
+					internedData.WriteMessage(protoencoder.InternedDataFieldDebugAnnotationStringValues, func(internedStr *protoencoder.Encoder) {
+						internedStr.WriteUint64(protoencoder.InternedStringFieldIid, &ann.iid)
+						internedStr.WriteBytes(protoencoder.InternedStringFieldStr, ann.str)
+					})
+				}
+			})
+
+			if len(t.interning.EventNames) == 1 {
+				// First packet with interning data needs to set these
+				prevDropped := true
+				seqFlags := uint32(protoencoder.SeqIncrementalStateCleared | protoencoder.SeqNeedsIncrementalState)
+				packet.WriteBool(protoencoder.TracePacketFieldPreviousPacketDropped, &prevDropped)
+				packet.WriteUint32(protoencoder.TracePacketFieldSequenceFlags, &seqFlags)
 			}
-			internedData.DebugAnnotationStringValues = arr
+		} else {
+			// Later packets using interned data need to set this
+			if t.features.Interning {
+				seqFlags := uint32(protoencoder.SeqNeedsIncrementalState)
+				packet.WriteUint32(protoencoder.TracePacketFieldSequenceFlags, &seqFlags)
+			}
 		}
-	}
-
-	tp := &pp.TracePacket{
-		Data:                            e.Emit(t),
-		OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{TPSID},
-	}
-
-	// We emit an incremental timestamp if 1) the feature is enabled
-	// and 2) the delta since the last timestamp is positive. If (2)
-	// is not true, emit the event on the default, non-incremental
-	// clock to avoid a wraparound on the uint64 delta.
-	if t.features.IncrementalTS && e.Timestamp >= t.lastTimestamp {
-		delta := e.Timestamp - t.lastTimestamp
-		t.lastTimestamp = e.Timestamp
-		tp.Timestamp = &delta
-		tp.TimestampClockId = proto.Uint32(CustomClockID)
-	} else {
-		tp.Timestamp = &e.Timestamp
-	}
-
-	// In addition to this Event's data, emit the interning data
-	if internedData != nil {
-		tp.InternedData = internedData
-		if len(t.interning.EventNames) == 1 {
-			// First packet with interning data needs to set these
-			tp.PreviousPacketDropped = proto.Bool(true)
-			tp.SequenceFlags = proto.Uint32(uint32(
-				pp.TracePacket_SEQ_INCREMENTAL_STATE_CLEARED |
-					pp.TracePacket_SEQ_NEEDS_INCREMENTAL_STATE))
-		}
-	} else {
-		// Later packets using interned data need to set this
-		if t.features.Interning {
-			tp.SequenceFlags = proto.Uint32(uint32(
-				pp.TracePacket_SEQ_NEEDS_INCREMENTAL_STATE))
-		}
-	}
-
-	t.pt.Packet = append(t.pt.Packet, tp)
+	})
 }
 
 func (t *Trace) InstantEvent(track Track, ts uint64, name string) {
-	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_INSTANT, ts, name, nil))
+	t.AddEvent(NewEvent(track, protoencoder.TrackEventTypeInstant, ts, name, nil))
 }
 
 func (t *Trace) StartSlice(track Track, ts uint64, name string, ann ...Annotations) {
-	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name, nil, ann...))
+	t.AddEvent(NewEvent(track, protoencoder.TrackEventTypeSliceBegin, ts, name, nil, ann...))
 }
 
 func (t *Trace) StartSliceWithFlow(track Track, ts uint64, name string, flows []uint64, ann ...Annotations) {
-	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name, flows, ann...))
+	t.AddEvent(NewEvent(track, protoencoder.TrackEventTypeSliceBegin, ts, name, flows, ann...))
 }
 
 func (t *Trace) EndSlice(track Track, ts uint64) {
-	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_END, ts, "", nil))
+	t.AddEvent(NewEvent(track, protoencoder.TrackEventTypeSliceEnd, ts, "", nil))
 }
 
 func (t *Trace) EndSliceWithFlow(track Track, ts uint64, flows []uint64) {
-	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_END, ts, "", flows))
+	t.AddEvent(NewEvent(track, protoencoder.TrackEventTypeSliceEnd, ts, "", flows))
 }
 
 func (t *Trace) NewValue(track Counter, ts uint64, val int64) {
 	t.AddEvent(Event{
 		Timestamp: ts,
-		Type:      pp.TrackEvent_TYPE_COUNTER,
+		Type:      protoencoder.TrackEventTypeCounter,
 		Name:      track.Name,
 		Value:     val,
 		IsCounter: true,
@@ -420,12 +446,14 @@ func (t *Trace) NewValue(track Counter, ts uint64, val int64) {
 }
 
 func (t *Trace) Reset() {
-	t.pt = pp.Trace{}
+	t.buf.Reset()
+	t.lastTimestamp = 0
 }
 
-// Marshal calls proto.Marshal on the protobuf trace
+// Marshal returns the encoded trace as protobuf binary format
 func (t Trace) Marshal() ([]byte, error) {
-	return proto.Marshal(&t.pt)
+	// The buffer already contains the complete Trace message
+	return t.buf.Bytes(), nil
 }
 
 // -- { Misc } ----------------------------------------------------------------
@@ -437,19 +465,18 @@ type KV struct {
 
 type Annotations []KV
 
-func (a Annotations) Emit(tr *Trace) []*pp.DebugAnnotation {
-	iids := tr.interning.AnnValues
-	var res []*pp.DebugAnnotation
+func (a Annotations) encode(enc *protoencoder.Encoder, tr *Trace) {
 	for i := range a {
-		name := &pp.DebugAnnotation_Name{Name: a[i].K}
-		if tr.features.Interning {
-			iid, _ := iids[a[i].V]
-			value := &pp.DebugAnnotation_StringValueIid{StringValueIid: iid}
-			res = append(res, &pp.DebugAnnotation{NameField: name, Value: value})
-		} else {
-			value := &pp.DebugAnnotation_StringValue{StringValue: a[i].V}
-			res = append(res, &pp.DebugAnnotation{NameField: name, Value: value})
-		}
+		key := a[i].K
+		value := a[i].V
+		enc.WriteMessage(protoencoder.TrackEventFieldDebugAnnotations, func(ann *protoencoder.Encoder) {
+			ann.WriteString(protoencoder.DebugAnnotationFieldName, &key)
+			if tr.features.Interning {
+				iid, _ := tr.interning.AnnValues[value]
+				ann.WriteUint64(protoencoder.DebugAnnotationFieldStringValueIid, &iid)
+			} else {
+				ann.WriteString(protoencoder.DebugAnnotationFieldStringValue, &value)
+			}
+		})
 	}
-	return res
 }
