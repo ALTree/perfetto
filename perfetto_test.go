@@ -54,15 +54,15 @@ func TestAddThread(t *testing.T) {
 func TestAddManyThreads(t *testing.T) {
 	trace := NewTrace()
 	trace.AddProcess(1, "process")
-	for i := range 100 {
-		trace.AddThread(1, int32(i), fmt.Sprintf("Thread #%v", i))
+	for i := range int64(100) {
+		trace.AddThread(1, i, fmt.Sprintf("Thread #%v", i))
 	}
 	tr := RoundTrip(t, trace)
 
 	AssertEq("len(Threads)", t, len(trace.Threads), 100)
 	AssertEq("trace length", t, len(tr.Packet), 102)
 	packets := tr.Packet[2:]
-	for i := range int32(100) {
+	for i := range int64(100) {
 		tr := packets[i]
 		AssertEq("Thread Name", t, ThreadName(tr), fmt.Sprintf("Thread #%v", i))
 		AssertEq("Thread Tid", t, ThreadTid(tr), i)
@@ -412,7 +412,7 @@ func ThreadPid(p *pp.TracePacket) int32 {
 	return p.GetTrackDescriptor().GetThread().GetPid()
 }
 
-func ThreadTid(p *pp.TracePacket) int32 {
+func ThreadTid(p *pp.TracePacket) int64 {
 	return p.GetTrackDescriptor().GetThread().GetTid()
 }
 

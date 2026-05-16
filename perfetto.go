@@ -90,13 +90,13 @@ func (p Process) Emit() *pp.TracePacket_TrackDescriptor {
 type Thread struct {
 	BasicTrack
 	Pid int32 // Parent process id
-	Tid int32 // Thread id
+	Tid int64 // Thread id
 }
 
-func NewThread(pid, tid int32, name string) Thread {
+func NewThread(pid, tid int64, name string) Thread {
 	return Thread{
 		BasicTrack: NewTrack(name),
-		Pid:        pid,
+		Pid:        int32(pid),
 		Tid:        tid,
 	}
 }
@@ -223,7 +223,7 @@ func EmitClockSnapshot() *pp.TracePacket {
 // -- { Trace } --------------------------------
 
 type Trace struct {
-	Threads  map[int32]Thread   // Thread tracks added to the trace
+	Threads  map[int64]Thread   // Thread tracks added to the trace
 	Counters map[string]Counter // Counter tracks added to the trace
 
 	pt            pp.Trace
@@ -251,7 +251,7 @@ type Interning struct {
 
 func NewTrace(features ...Features) Trace {
 	tr := Trace{
-		Threads:  make(map[int32]Thread),
+		Threads:  make(map[int64]Thread),
 		Counters: make(map[string]Counter),
 		interning: Interning{
 			EventNames: make(map[string]uint64),
@@ -295,7 +295,7 @@ func (t *Trace) AddProcess(pid int32, name string) Process {
 // AddThread adds a thread with the given tid and name to the trace,
 // under the process with the given pid. It returns a handle that can
 // be used to associate events to the thread.
-func (t *Trace) AddThread(pid, tid int32, name string) Thread {
+func (t *Trace) AddThread(pid, tid int64, name string) Thread {
 	tr := NewThread(pid, tid, name)
 	t.pt.Packet = append(t.pt.Packet, &pp.TracePacket{Data: tr.Emit()})
 	t.Threads[tid] = tr
