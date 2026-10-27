@@ -375,6 +375,22 @@ func TestFlows(t *testing.T) {
 	}
 }
 
+func BenchmarkAddEvent(b *testing.B) {
+	trace := NewTrace()
+	trace.AddProcess(1, "process #1")
+	t := trace.AddThread(1, 1, "Thread #1")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		trace.Reset()
+		for i := range uint64(1000) {
+			trace.StartSlice(t, 100*i, "t1 func")
+			trace.EndSlice(t, 100*i+50)
+		}
+	}
+
+}
+
 // ---- { testing helpers } --------------------------------
 
 func RoundTrip(t *testing.T, trace Trace) pp.Trace {

@@ -134,7 +134,7 @@ func (c Counter) Emit() *pp.TracePacket_TrackDescriptor {
 			Uuid:                &c.Uuid,
 			StaticOrDynamicName: &pp.TrackDescriptor_Name{Name: c.Name},
 			Counter: &pp.CounterDescriptor{
-				UnitName: proto.String(c.Unit),
+				UnitName: new(c.Unit),
 			},
 		},
 	}
@@ -208,9 +208,9 @@ func EmitClockSnapshot() *pp.TracePacket {
 						Timestamp: proto.Uint64(0),
 					},
 					{
-						ClockId:       proto.Uint32(CustomClockID),
+						ClockId:       new(CustomClockID),
 						Timestamp:     proto.Uint64(0),
-						IsIncremental: proto.Bool(true),
+						IsIncremental: new(true),
 					},
 				},
 			},
@@ -364,7 +364,7 @@ func (t *Trace) AddEvent(e Event) {
 		delta := e.Timestamp - t.lastTimestamp
 		t.lastTimestamp = e.Timestamp
 		tp.Timestamp = &delta
-		tp.TimestampClockId = proto.Uint32(CustomClockID)
+		tp.TimestampClockId = new(CustomClockID)
 	} else {
 		tp.Timestamp = &e.Timestamp
 	}
