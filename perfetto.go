@@ -372,7 +372,7 @@ func (t *Trace) AddEvent(e Event) {
 		tp.InternedData = internedData
 		if len(t.interning.EventNames) == 1 {
 			// First packet with interning data needs to set these
-			tp.PreviousPacketDropped = proto.Bool(true)
+			tp.PreviousPacketDropped = proto.Uint32(1)
 			tp.SequenceFlags = proto.Uint32(uint32(
 				pp.TracePacket_SEQ_INCREMENTAL_STATE_CLEARED |
 					pp.TracePacket_SEQ_NEEDS_INCREMENTAL_STATE))
