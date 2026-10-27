@@ -46,7 +46,7 @@ func NewTrack(name string) BasicTrack {
 
 func (t BasicTrack) Emit() *pp.TracePacket_TrackDescriptor {
 	return &pp.TracePacket_TrackDescriptor{
-		&pp.TrackDescriptor{
+		TrackDescriptor: &pp.TrackDescriptor{
 			Uuid:                &t.Uuid,
 			StaticOrDynamicName: &pp.TrackDescriptor_Name{Name: t.Name},
 		},
@@ -75,7 +75,7 @@ func NewProcess(pid int32, name string) Process {
 
 func (p Process) Emit() *pp.TracePacket_TrackDescriptor {
 	return &pp.TracePacket_TrackDescriptor{
-		&pp.TrackDescriptor{
+		TrackDescriptor: &pp.TrackDescriptor{
 			Uuid: &p.Uuid,
 			Process: &pp.ProcessDescriptor{
 				Pid:         &p.Pid,
@@ -103,7 +103,7 @@ func NewThread(pid, tid int64, name string) Thread {
 
 func (t Thread) Emit() *pp.TracePacket_TrackDescriptor {
 	return &pp.TracePacket_TrackDescriptor{
-		&pp.TrackDescriptor{
+		TrackDescriptor: &pp.TrackDescriptor{
 			Uuid: &t.Uuid,
 			Thread: &pp.ThreadDescriptor{
 				Pid:        &t.Pid,
@@ -130,9 +130,9 @@ func NewCounter(name, unit string) Counter {
 
 func (c Counter) Emit() *pp.TracePacket_TrackDescriptor {
 	return &pp.TracePacket_TrackDescriptor{
-		&pp.TrackDescriptor{
+		TrackDescriptor: &pp.TrackDescriptor{
 			Uuid:                &c.Uuid,
-			StaticOrDynamicName: &pp.TrackDescriptor_Name{c.Name},
+			StaticOrDynamicName: &pp.TrackDescriptor_Name{Name: c.Name},
 			Counter: &pp.CounterDescriptor{
 				UnitName: proto.String(c.Unit),
 			},
@@ -170,7 +170,7 @@ func NewEvent(track Track, Type pp.TrackEvent_Type, ts uint64, name string, flow
 
 func (e Event) Emit(tr *Trace) *pp.TracePacket_TrackEvent {
 	te := &pp.TracePacket_TrackEvent{
-		&pp.TrackEvent{
+		TrackEvent: &pp.TrackEvent{
 			TrackUuid:        &e.TrackUuid,
 			Type:             &e.Type,
 			FlowIds:          e.Flows,
@@ -180,15 +180,15 @@ func (e Event) Emit(tr *Trace) *pp.TracePacket_TrackEvent {
 
 	if tr.features.Interning {
 		iid, _ := tr.interning.EventNames[e.Name]
-		te.TrackEvent.NameField = &pp.TrackEvent_NameIid{iid}
+		te.TrackEvent.NameField = &pp.TrackEvent_NameIid{NameIid: iid}
 	} else {
 		if e.Name != "" {
-			te.TrackEvent.NameField = &pp.TrackEvent_Name{e.Name}
+			te.TrackEvent.NameField = &pp.TrackEvent_Name{Name: e.Name}
 		}
 	}
 
 	if e.IsCounter {
-		te.TrackEvent.CounterValueField = &pp.TrackEvent_CounterValue{e.Value}
+		te.TrackEvent.CounterValueField = &pp.TrackEvent_CounterValue{CounterValue: e.Value}
 	}
 
 	return te
@@ -201,7 +201,7 @@ func EmitClockSnapshot() *pp.TracePacket {
 	boottimeClockId := uint32(pp.BuiltinClock_BUILTIN_CLOCK_BOOTTIME)
 	return &pp.TracePacket{
 		Data: &pp.TracePacket_ClockSnapshot{
-			&pp.ClockSnapshot{
+			ClockSnapshot: &pp.ClockSnapshot{
 				Clocks: []*pp.ClockSnapshot_Clock{
 					{
 						ClockId:   &boottimeClockId,
@@ -215,7 +215,7 @@ func EmitClockSnapshot() *pp.TracePacket {
 				},
 			},
 		},
-		OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{TPSID},
+		OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{TrustedPacketSequenceId: TPSID},
 	}
 
 }
@@ -323,7 +323,7 @@ func (t *Trace) AddEvent(e Event) {
 			iid := t.interning.NextNameId
 			internedData = &pp.InternedData{
 				EventNames: []*pp.EventName{
-					&pp.EventName{Iid: &iid, Name: &e.Name},
+					{Iid: &iid, Name: &e.Name},
 				},
 			}
 			t.interning.EventNames[e.Name] = iid
@@ -350,8 +350,10 @@ func (t *Trace) AddEvent(e Event) {
 	}
 
 	tp := &pp.TracePacket{
-		Data:                            e.Emit(t),
-		OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{TPSID},
+		Data: e.Emit(t),
+		OptionalTrustedPacketSequenceId: &pp.TracePacket_TrustedPacketSequenceId{
+			TrustedPacketSequenceId: TPSID,
+		},
 	}
 
 	// We emit an incremental timestamp if 1) the feature is enabled
@@ -424,7 +426,7 @@ func (t *Trace) Reset() {
 }
 
 // Marshal calls proto.Marshal on the protobuf trace
-func (t Trace) Marshal() ([]byte, error) {
+func (t *Trace) Marshal() ([]byte, error) {
 	return proto.Marshal(&t.pt)
 }
 
