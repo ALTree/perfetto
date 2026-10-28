@@ -147,34 +147,28 @@ type Event struct {
 	Timestamp uint64
 	Name      string
 	Type      pp.TrackEvent_Type
-	IsCounter bool        // true iff Even is a TrackEvent_Counter
-	Value     int64       // set for TrackEvent_Counters
-	TrackUuid uint64      // Uuid of the track this event is part of
-	Flows     []uint64    // optional flows IDs
-	Ann       Annotations // optional Debug Annotations
+	IsCounter bool     // true iff Even is a TrackEvent_Counter
+	Value     int64    // set for TrackEvent_Counters
+	TrackUuid uint64   // Uuid of the track this event is part of
+	Flows     []uint64 // optional flows IDs
 }
 
-func NewEvent(track Track, Type pp.TrackEvent_Type, ts uint64, name string, flows []uint64, ann ...Annotations) Event {
-	e := Event{
+func NewEvent(track Track, Type pp.TrackEvent_Type, ts uint64, name string, flows []uint64) Event {
+	return Event{
 		Timestamp: ts,
 		Type:      Type,
 		Name:      name,
 		Flows:     flows,
 		TrackUuid: track.GetUuid(),
 	}
-	if len(ann) > 0 {
-		e.Ann = ann[0]
-	}
-	return e
 }
 
 func (e Event) Emit(tr *Trace) *pp.TracePacket_TrackEvent {
 	te := &pp.TracePacket_TrackEvent{
 		TrackEvent: &pp.TrackEvent{
-			TrackUuid:        &e.TrackUuid,
-			Type:             &e.Type,
-			FlowIds:          e.Flows,
-			DebugAnnotations: e.Ann.Emit(tr),
+			TrackUuid: &e.TrackUuid,
+			Type:      &e.Type,
+			FlowIds:   e.Flows,
 		},
 	}
 
@@ -245,8 +239,6 @@ var DefaultFeatures = Features{
 type Interning struct {
 	EventNames map[string]uint64
 	NextNameId uint64
-	AnnValues  map[string]uint64
-	NextAnnId  uint64
 }
 
 func NewTrace(features ...Features) Trace {
@@ -256,8 +248,6 @@ func NewTrace(features ...Features) Trace {
 		interning: Interning{
 			EventNames: make(map[string]uint64),
 			NextNameId: 1,
-			AnnValues:  make(map[string]uint64),
-			NextAnnId:  1,
 		},
 	}
 
@@ -329,24 +319,6 @@ func (t *Trace) AddEvent(e Event) {
 			t.interning.EventNames[e.Name] = iid
 			t.interning.NextNameId++
 		}
-
-		// Debug Annotations Values Interning
-		var arr []*pp.InternedString
-		for _, ann := range e.Ann {
-			iid, ok := t.interning.AnnValues[ann.V]
-			if !ok && ann.V != "" {
-				iid = t.interning.NextAnnId
-				arr = append(arr, &pp.InternedString{Iid: &iid, Str: []byte(ann.V)})
-				t.interning.AnnValues[ann.V] = iid
-				t.interning.NextAnnId++
-			}
-		}
-		if len(arr) > 0 {
-			if internedData == nil {
-				internedData = &pp.InternedData{}
-			}
-			internedData.DebugAnnotationStringValues = arr
-		}
 	}
 
 	tp := &pp.TracePacket{
@@ -394,12 +366,12 @@ func (t *Trace) InstantEvent(track Track, ts uint64, name string) {
 	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_INSTANT, ts, name, nil))
 }
 
-func (t *Trace) StartSlice(track Track, ts uint64, name string, ann ...Annotations) {
-	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name, nil, ann...))
+func (t *Trace) StartSlice(track Track, ts uint64, name string) {
+	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name, nil))
 }
 
-func (t *Trace) StartSliceWithFlow(track Track, ts uint64, name string, flows []uint64, ann ...Annotations) {
-	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name, flows, ann...))
+func (t *Trace) StartSliceWithFlow(track Track, ts uint64, name string, flows []uint64) {
+	t.AddEvent(NewEvent(track, pp.TrackEvent_TYPE_SLICE_BEGIN, ts, name, flows))
 }
 
 func (t *Trace) EndSlice(track Track, ts uint64) {
@@ -428,30 +400,4 @@ func (t *Trace) Reset() {
 // Marshal calls proto.Marshal on the protobuf trace
 func (t *Trace) Marshal() ([]byte, error) {
 	return proto.Marshal(&t.pt)
-}
-
-// -- { Misc } ----------------------------------------------------------------
-
-// KV is a (key, value) tuple representing a Debug Annotation
-type KV struct {
-	K, V string
-}
-
-type Annotations []KV
-
-func (a Annotations) Emit(tr *Trace) []*pp.DebugAnnotation {
-	iids := tr.interning.AnnValues
-	var res []*pp.DebugAnnotation
-	for i := range a {
-		name := &pp.DebugAnnotation_Name{Name: a[i].K}
-		if tr.features.Interning {
-			iid, _ := iids[a[i].V]
-			value := &pp.DebugAnnotation_StringValueIid{StringValueIid: iid}
-			res = append(res, &pp.DebugAnnotation{NameField: name, Value: value})
-		} else {
-			value := &pp.DebugAnnotation_StringValue{StringValue: a[i].V}
-			res = append(res, &pp.DebugAnnotation{NameField: name, Value: value})
-		}
-	}
-	return res
 }

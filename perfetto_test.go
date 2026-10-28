@@ -340,22 +340,6 @@ func ManyEventsFullTimestamps(t *testing.T) {
 	}
 }
 
-func TestAnnotations(t *testing.T) {
-	trace := NewTrace(Features{Interning: false})
-	trace.AddProcess(1, "process #1")
-	t1 := trace.AddThread(1, 2, "Thread #1")
-
-	ann := []KV{{"k1", "v1"}, {"k2", "v2"}, {"k3", "v3"}}
-	trace.StartSlice(t1, 100, "t1 func", ann)
-	trace.EndSlice(t1, 150)
-
-	tr := RoundTrip(t, trace)
-	AssertEq("trace length", t, len(tr.Packet), 4)
-	if got := EventAnnotations(tr.Packet[2]); !slices.Equal(ann, got) {
-		t.Errorf("For %s\ngot %v\nexp %v", "Annotations", got, ann)
-	}
-}
-
 func TestFlows(t *testing.T) {
 	trace := NewTrace()
 	trace.AddProcess(1, "process #1")
@@ -466,14 +450,6 @@ func EventTrackUuid(p *pp.TracePacket) uint64 {
 
 func EventFlows(p *pp.TracePacket) []uint64 {
 	return p.GetTrackEvent().GetFlowIds()
-}
-
-func EventAnnotations(p *pp.TracePacket) []KV {
-	var res []KV
-	for _, a := range p.GetTrackEvent().GetDebugAnnotations() {
-		res = append(res, KV{a.GetName(), a.GetStringValue()})
-	}
-	return res
 }
 
 func AssertEq[V comparable](fmt string, t *testing.T, got, exp V) {

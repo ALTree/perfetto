@@ -19,12 +19,6 @@ func main() {
 	t5 := trace.AddThread(1, 3, "Thread")
 	cpu := trace.AddCounter("cpu load", "%")
 
-	stack := []perfetto.KV{
-		{"1", "func1"},
-		{"2", "func2"},
-		{"3", "func3"},
-	}
-
 	trace.StartSlice(t3, 100, "HTTP Request 1 /get")
 	trace.EndSlice(t3, 200)
 	trace.StartSlice(t4, 150, "HTTP Request 2 /post")
@@ -38,7 +32,7 @@ func main() {
 	}
 
 	for i := range uint64(100) {
-		trace.StartSlice(t1, i*100, "func1", stack)
+		trace.StartSlice(t1, i*100, "func1")
 		trace.EndSlice(t1, i*100+50)
 		trace.InstantEvent(t1, i*100+60, "Instant event")
 
@@ -53,7 +47,7 @@ func main() {
 	}
 
 	for i := range uint64(20) {
-		trace.StartSliceWithFlow(t5, i*100, "Function with flow", []uint64{i}, stack)
+		trace.StartSliceWithFlow(t5, i*100, "Function with flow", []uint64{i})
 		trace.EndSliceWithFlow(t5, i*100+50, []uint64{i - 1})
 	}
 
