@@ -393,8 +393,12 @@ func (t *Trace) NewValue(track Counter, ts uint64, val int64) {
 	})
 }
 
-func (t *Trace) Reset() {
-	t.pt = pp.Trace{}
+func (tr *Trace) Reset() {
+	tr.pt = pp.Trace{}
+	tr.lastTimestamp = 0
+	if tr.features.IncrementalTS {
+		tr.pt.Packet = append(tr.pt.Packet, EmitClockSnapshot())
+	}
 }
 
 // Marshal calls proto.Marshal on the protobuf trace
